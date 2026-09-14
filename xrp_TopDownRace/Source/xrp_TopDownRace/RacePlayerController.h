@@ -5,8 +5,9 @@
 #include "RacePlayerController.generated.h"
 
 /**
- * One per local player / controller index. Polls its own controller (and the keyboard, for player 1),
- * joins the race on any button press, then drives its car. Always views the shared track camera.
+ * One per local player / controller index. Polls its own controller (and the keyboard, for player 1).
+ * Its car races under computer control until the player presses a button, which hands them the car;
+ * after a long idle it goes back to the computer. Always views the shared track camera.
  */
 UCLASS()
 class XRP_TOPDOWNRACE_API ARacePlayerController : public APlayerController
@@ -27,6 +28,9 @@ private:
 
 	bool bRoomListenerApplied = false;
 	bool bJoinButtonHeld = false;
+	float IdleTime = 0.0f;
+
+	// race.AutoDrive test aid state
 	float AutoDriveLogTimer = 0.0f;
 	int32 AutoDriveFrames = 0;
 	FVector AutoDriveLastLocation = FVector::ZeroVector;

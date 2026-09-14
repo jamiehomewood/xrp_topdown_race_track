@@ -74,6 +74,17 @@ def build_materials():
         mel.recompile_material(parent)
     eal.save_loaded_asset(parent)
 
+    # Unlit emissive material for the start lights; the game drives "Color" at runtime (dynamic instances).
+    light = load_or_create("M_RaceLight", MAT_DIR, unreal.Material, unreal.MaterialFactoryNew())
+    if mel.get_num_material_expressions(light) == 0:
+        light.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+        light_color = mel.create_material_expression(light, unreal.MaterialExpressionVectorParameter, -400, 0)
+        light_color.set_editor_property("parameter_name", "Color")
+        light_color.set_editor_property("default_value", unreal.LinearColor(0.05, 0.0, 0.0, 1.0))
+        mel.connect_material_property(light_color, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+        mel.recompile_material(light)
+    eal.save_loaded_asset(light)
+
     instances = {}
     for slot, grey in GREYS.items():
         mi = load_or_create("MI_Track_" + slot, MAT_DIR, unreal.MaterialInstanceConstant,

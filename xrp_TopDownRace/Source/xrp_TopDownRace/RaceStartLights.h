@@ -1,0 +1,49 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "RaceStartLights.generated.h"
+
+class UMaterialInstanceDynamic;
+class UMaterialInterface;
+class UStaticMesh;
+class UStaticMeshComponent;
+
+/**
+ * Five red start lights, drawn on one or more boards (a gantry over the start line for the floor projection,
+ * large boards beyond the front and back walls for the wall projection). All boards show the same state.
+ */
+UCLASS()
+class XRP_TOPDOWNRACE_API ARaceStartLights : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ARaceStartLights();
+
+	static constexpr int32 NumLights = 5;
+
+	/**
+	 * Adds a board. BoardTransform places its centre; the lights run along the board's local +Y
+	 * (first light at -Y, i.e. the viewer's left when +Y is the viewer's right) and face its local +Z.
+	 */
+	void AddBoard(const FTransform& BoardTransform, float LightRadius, float Spacing);
+
+	/** 0 = all dark, 1..5 = that many lit, counting from the first light. */
+	void SetLitCount(int32 Count);
+
+private:
+	UStaticMeshComponent* AddMesh(UStaticMesh* Mesh, const FTransform& RelativeTransform, UMaterialInterface* Material);
+	UMaterialInterface* GetBaseMaterial();
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> LightMaterials;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UStaticMeshComponent>> Meshes;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> BaseMaterial;
+
+	int32 LitCount = -1;
+};

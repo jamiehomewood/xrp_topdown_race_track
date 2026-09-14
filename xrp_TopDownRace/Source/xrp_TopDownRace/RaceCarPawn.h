@@ -5,14 +5,16 @@
 #include "RaceCarPawn.generated.h"
 
 class UBoxComponent;
+class UMaterialInstanceDynamic;
 class URaceEngineSynth;
 class UStaticMesh;
 class UStaticMeshComponent;
+class UTextRenderComponent;
 
 /**
- * Arcade top-down car. Not possessed: its ARacePlayerController feeds it input every frame.
- * Cars start inactive (hidden, no collision) and are activated when a player joins.
- * Units follow the track build: 1 physical cm = 10 UU, so speeds are real-car scale.
+ * Arcade top-down car with a GTA 2 style feel: slides, bounces off walls and other cars with a spin, and a
+ * handbrake for doughnuts. Not possessed: a player's ARacePlayerController or the game mode's computer driver
+ * feeds it input every frame. Units follow the track build (1 physical cm = 10 UU), so speeds are real-car scale.
  */
 UCLASS()
 class XRP_TOPDOWNRACE_API ARaceCarPawn : public APawn
@@ -28,20 +30,50 @@ public:
 	/** Swap the visual mesh and fit the collision box to it. */
 	void SetCarMesh(UStaticMesh* Mesh);
 
-	/** Throttle and brake 0..1, steer -1 (left) .. 1 (right). */
-	void SetDriveInput(float InThrottle, float InBrake, float InSteer);
+	/** Throttle and brake 0..1, steer -1 (left) .. 1 (right), handbrake held. */
+	void SetDriveInput(float InThrottle, float InBrake, float InSteer, bool bInHandbrake = false);
 
 	/** Place on the track at SpawnTransform (backing up along the grid if the spot is taken) and enable. */
 	void Activate(const FTransform& SpawnTransform);
 	void Deactivate();
 	bool IsActive() const { return bActive; }
 	float GetSpeed() const { return Velocity.Size2D(); }
+	float GetSpinRate() const { return AngularVelocity; }
+
+	/** Race control: while locked the car stays put and the throttle only revs the engine (grid, lights, results). */
+	void SetControlsLocked(bool bLocked);
+	bool AreControlsLocked() const { return bControlsLocked; }
+
+	/** Teleport onto a grid slot, stopped. No overlap back-off: the whole grid is placed together. */
+	void PlaceOnGrid(const FTransform& GridTransform);
+
+	/** Slipstream strength wanted this frame, 0..1 (set by the game mode from the car ahead); the car eases towards it. */
+	void SetDraftTarget(float Strength) { DraftTarget = FMath::Clamp(Strength, 0.0f, 1.0f); }
+	float GetDraftFactor() const { return DraftFactor; }
+
+	/** Slot number and player colour, used for the roof badge and the player marker. */
+	void SetPlayerIdentity(int32 Slot, FColor Color);
+
+	/** A player drives this car: glowing marker underneath and a coloured "P1" badge. Otherwise it's a CPU car. */
+	void SetPlayerControlled(bool bInPlayerControlled);
+	bool IsPlayerControlled() const { return bPlayerControlled; }
+
+	/** A shove from another car: change in velocity and where it hit (adds spin). */
+	void ApplyBump(const FVector& DeltaVelocity, const FVector& WorldContactPoint);
 
 	UPROPERTY(VisibleAnywhere, Category = "Race|Car")
 	TObjectPtr<UBoxComponent> Collision;
 
 	UPROPERTY(VisibleAnywhere, Category = "Race|Car")
 	TObjectPtr<UStaticMeshComponent> Body;
+
+	/** Number badge lying on the roof so it reads from above. */
+	UPROPERTY(VisibleAnywhere, Category = "Race|Car")
+	TObjectPtr<UTextRenderComponent> Badge;
+
+	/** Glowing disc under a player's car, in the player's colour. */
+	UPROPERTY(VisibleAnywhere, Category = "Race|Car")
+	TObjectPtr<UStaticMeshComponent> PlayerMarker;
 
 	/** Spatialized engine voice; plays while the car is in the race. */
 	UPROPERTY(VisibleAnywhere, Category = "Race|Car")
@@ -62,21 +94,22 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Race|Car")
 	float RoadHeight = 2.0f;
 
+	/** Top speed without a slipstream. Kept modest so a drafting car can catch up and pass on the straights. */
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float MaxSpeed = 2600.0f;
+	float MaxSpeed = 1800.0f;
 
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float MaxReverseSpeed = 800.0f;
+	float MaxReverseSpeed = 700.0f;
 
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float Acceleration = 2200.0f;
+	float Acceleration = 1500.0f;
 
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float BrakeDeceleration = 4000.0f;
+	float BrakeDeceleration = 3200.0f;
 
 	/** Speed lost per second when coasting. */
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float CoastDeceleration = 1000.0f;
+	float CoastDeceleration = 800.0f;
 
 	/** Degrees per second at full steer once above FullSteerSpeed. */
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
@@ -92,14 +125,54 @@ public:
 
 	/** How quickly sideways sliding is killed (higher = grippier, lower = driftier). */
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float Grip = 6.0f;
+	float Grip = 4.5f;
 
-	/** Fraction of into-the-wall velocity reflected back on impact. */
-	UPROPERTY(EditAnywhere, Category = "Race|Handling", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float WallBounce = 0.35f;
+	/** How quickly the car's spin settles back to what the steering asks for (lower = spins last longer). */
+	UPROPERTY(EditAnywhere, Category = "Race|Handling")
+	float SpinRecovery = 5.0f;
+
+	/** Grip with the handbrake on: the back steps out. */
+	UPROPERTY(EditAnywhere, Category = "Race|Handbrake")
+	float HandbrakeGrip = 0.7f;
+
+	/** Turn rate multiplier with the handbrake on, available even at a crawl (doughnuts). */
+	UPROPERTY(EditAnywhere, Category = "Race|Handbrake")
+	float HandbrakeTurnBoost = 1.7f;
+
+	/** Speed lost per second while the handbrake is held. */
+	UPROPERTY(EditAnywhere, Category = "Race|Handbrake")
+	float HandbrakeDrag = 500.0f;
+
+	/** Fraction of into-the-wall speed bounced back. */
+	UPROPERTY(EditAnywhere, Category = "Race|Collisions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float WallBounce = 0.55f;
+
+	/** Bounciness of car-to-car hits (both cars share the impulse). */
+	UPROPERTY(EditAnywhere, Category = "Race|Collisions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float CarBounce = 0.6f;
+
+	/** Spin from an off-centre hit: degrees per second per (UU offset x UU/s impulse). */
+	UPROPERTY(EditAnywhere, Category = "Race|Collisions", meta = (ClampMin = "0.0"))
+	float ImpactSpin = 0.0025f;
+
+	/** Extra top speed at full slipstream (0.22 = +22%). */
+	UPROPERTY(EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.0"))
+	float DraftTopSpeedBonus = 0.22f;
+
+	/** Extra acceleration at full slipstream (0.6 = +60%). */
+	UPROPERTY(EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.0"))
+	float DraftAccelerationBonus = 0.6f;
+
+	/** How fast the slipstream builds up (1/s) when tucked in behind, and fades (1/s) after pulling out. */
+	UPROPERTY(EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.1"))
+	float DraftBuildRate = 2.5f;
+
+	UPROPERTY(EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.1"))
+	float DraftFadeRate = 1.5f;
 
 private:
 	void ApplyMeshTransform();
+	void UpdateIdentityVisuals();
 
 	/** Turn by YawDelta; if that would push the box into a wall, slide away from the wall first. */
 	void ApplyYaw(float YawDelta);
@@ -112,12 +185,26 @@ private:
 	/** Moves Location away from the last wall hit until the box fits at Rotation. */
 	bool FindFreeSpotNearby(FVector& Location, const FQuat& Rotation) const;
 
+	/** Spin from an impulse applied Offset away from the car's centre. */
+	void AddSpin(const FVector& Offset, const FVector& Impulse);
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> MarkerMaterial;
+
 	FVector Velocity = FVector::ZeroVector;
+	float AngularVelocity = 0.0f; // yaw, degrees per second
 	FVector LastWallNormal = FVector::ZeroVector;
 	float TimeSinceWallHit = 1000.0f;
 	float TimeSinceImpactSound = 1000.0f;
 	float Throttle = 0.0f;
 	float Brake = 0.0f;
 	float Steer = 0.0f;
+	bool bHandbrake = false;
+	float DraftTarget = 0.0f;
+	float DraftFactor = 0.0f;
+	int32 SlotNumber = 0;
+	FColor PlayerColor = FColor::White;
 	bool bActive = false;
+	bool bControlsLocked = false;
+	bool bPlayerControlled = false;
 };

@@ -11,11 +11,13 @@ namespace
 {
 	TAutoConsoleVariable<int32> CVarRaceAutoDrive(
 		TEXT("race.AutoDrive"), 0,
-		TEXT("Test aid (no controller needed): every player joins and drives full throttle, logging position, distance moved and FPS each second. 1 = straight, 2 = steering 60% and, like a player, steering the other way when stuck against a wall."));
+		TEXT("Test aid (no controller needed): players take their cars and drive by themselves, logging position, distance moved, FPS, slipstream and spin each second. ")
+		TEXT("1 = full throttle straight, 2 = steering 60% and steering the other way when stuck against a wall, ")
+		TEXT("3 = driven by the computer driver (checks taking over a car), 4 = doughnut: throttle + handbrake + full lock."));
 
 	TAutoConsoleVariable<int32> CVarRaceAutoDriveCars(
 		TEXT("race.AutoDriveCars"), 4,
-		TEXT("How many cars race.AutoDrive brings into the race (1-4)."));
+		TEXT("How many players race.AutoDrive brings in (1-4)."));
 
 	const TArray<FKey>& GamepadJoinKeys()
 	{
@@ -80,7 +82,8 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 		ApplyRoomAudioListener();
 	}
 
-	ARaceCarPawn* Car = GameMode->GetCarForSlot(GetSlotIndex());
+	const int32 Slot = GetSlotIndex();
+	ARaceCarPawn* Car = GameMode->GetCarForSlot(Slot);
 	if (!Car)
 	{
 		return;
@@ -90,6 +93,7 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 	float Throttle = 0.0f;
 	float Brake = 0.0f;
 	float Steer = 0.0f;
+	bool bHandbrake = false;
 	bool bJoinPressed = false;
 
 	if (Settings->bGamepadInputEnabled)
@@ -98,6 +102,7 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 			IsInputKeyDown(EKeys::Gamepad_FaceButton_Bottom) ? 1.0f : 0.0f);
 		Brake = FMath::Max(GetInputAnalogKeyState(EKeys::Gamepad_LeftTriggerAxis),
 			IsInputKeyDown(EKeys::Gamepad_FaceButton_Left) ? 1.0f : 0.0f);
+		bHandbrake = IsInputKeyDown(EKeys::Gamepad_FaceButton_Right) || IsInputKeyDown(EKeys::Gamepad_RightShoulder);
 
 		const float StickX = GetInputAnalogKeyState(EKeys::Gamepad_LeftX);
 		if (FMath::Abs(StickX) > Settings->StickDeadZone)
@@ -113,10 +118,11 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 	}
 
 	// Keyboard input only ever reaches the primary local player.
-	if (Settings->bKeyboardInputEnabled && GetSlotIndex() == 0)
+	if (Settings->bKeyboardInputEnabled && Slot == 0)
 	{
 		if (IsInputKeyDown(EKeys::W) || IsInputKeyDown(EKeys::Up)) { Throttle = 1.0f; }
 		if (IsInputKeyDown(EKeys::S) || IsInputKeyDown(EKeys::Down)) { Brake = 1.0f; }
+		if (IsInputKeyDown(EKeys::SpaceBar)) { bHandbrake = true; }
 		Steer += (IsInputKeyDown(EKeys::D) || IsInputKeyDown(EKeys::Right)) ? 1.0f : 0.0f;
 		Steer -= (IsInputKeyDown(EKeys::A) || IsInputKeyDown(EKeys::Left)) ? 1.0f : 0.0f;
 
@@ -125,14 +131,17 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 			bJoinPressed |= IsInputKeyDown(Key);
 		}
 	}
+	Steer = FMath::Clamp(Steer, -1.0f, 1.0f);
 
 	const int32 AutoDriveMode = CVarRaceAutoDrive.GetValueOnGameThread();
 	if (AutoDriveMode > 0)
 	{
-		bJoinPressed = !Car->IsActive() && GetSlotIndex() < CVarRaceAutoDriveCars.GetValueOnGameThread();
+		bJoinPressed = !Car->IsPlayerControlled() && Slot < CVarRaceAutoDriveCars.GetValueOnGameThread();
 		Throttle = 1.0f;
+		Brake = 0.0f;
 		Steer = 0.0f;
-		if (AutoDriveMode >= 2 && Car->IsActive())
+		bHandbrake = false;
+		if (AutoDriveMode == 2)
 		{
 			// Behave like a player: if the car has barely moved for half a second, steer the other way and keep
 			// turning that way long enough to come round (about 190 degrees at standstill steering).
@@ -152,15 +161,26 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 			}
 			Steer = 0.6f * AutoDriveSteerSign;
 		}
+		else if (AutoDriveMode == 3)
+		{
+			GameMode->ComputeComputerDriverInput(Slot, DeltaTime, Throttle, Brake, Steer, bHandbrake);
+		}
+		else if (AutoDriveMode >= 4)
+		{
+			Throttle = 0.7f;
+			Steer = 1.0f;
+			bHandbrake = true;
+		}
+
 		AutoDriveLogTimer += DeltaTime;
 		++AutoDriveFrames;
-		if (Car->IsActive() && AutoDriveLogTimer >= 1.0f)
+		if (Car->IsPlayerControlled() && AutoDriveLogTimer >= 1.0f)
 		{
 			const FVector Location = Car->GetActorLocation();
 			const float Moved = bAutoDriveHasLastLocation ? FVector::Dist2D(Location, AutoDriveLastLocation) : 0.0f;
-			UE_LOG(LogTemp, Log, TEXT("race.AutoDrive slot %d at (%.0f, %.0f) yaw %.0f speed %.0f moved %.0f fps %.1f escapes %d"),
-				GetSlotIndex(), Location.X, Location.Y, Car->GetActorRotation().Yaw, Car->GetSpeed(), Moved,
-				AutoDriveFrames / AutoDriveLogTimer, AutoDriveEscapes);
+			UE_LOG(LogTemp, Log, TEXT("race.AutoDrive slot %d at (%.0f, %.0f) yaw %.0f speed %.0f moved %.0f fps %.1f escapes %d draft %.2f spin %.0f"),
+				Slot, Location.X, Location.Y, Car->GetActorRotation().Yaw, Car->GetSpeed(), Moved,
+				AutoDriveFrames / AutoDriveLogTimer, AutoDriveEscapes, Car->GetDraftFactor(), Car->GetSpinRate());
 			AutoDriveLastLocation = Location;
 			bAutoDriveHasLastLocation = true;
 			AutoDriveLogTimer = 0.0f;
@@ -168,16 +188,28 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 		}
 	}
 
-	if (!Car->IsActive())
+	if (!Car->IsPlayerControlled())
 	{
-		// Arcade join: a fresh press on an idle controller brings its car onto the grid.
+		// Arcade join: a fresh press takes this slot's car over from the computer, whatever the race is doing.
 		if (bJoinPressed && !bJoinButtonHeld)
 		{
 			GameMode->JoinRace(this);
+			IdleTime = 0.0f;
 		}
 		bJoinButtonHeld = bJoinPressed;
 		return;
 	}
 
-	Car->SetDriveInput(Throttle, Brake, Steer);
+	// Hand the car back to the computer if its player walks away.
+	const bool bAnyInput = Throttle > 0.05f || Brake > 0.05f || FMath::Abs(Steer) > 0.05f || bHandbrake || bJoinPressed;
+	IdleTime = bAnyInput ? 0.0f : IdleTime + DeltaTime;
+	if (Settings->IdleReleaseSeconds > 0.0f && IdleTime >= Settings->IdleReleaseSeconds)
+	{
+		IdleTime = 0.0f;
+		bJoinButtonHeld = true;
+		GameMode->ReleaseCar(Slot);
+		return;
+	}
+
+	Car->SetDriveInput(Throttle, Brake, Steer, bHandbrake);
 }

@@ -7,8 +7,12 @@ namespace
 	constexpr float OutputGain = 0.4f;
 	constexpr float RpmResponse = 4.0f;    // 1/s: engine note glides rather than jumps
 	constexpr float LoadResponse = 12.0f;  // 1/s
+	constexpr float SkidResponse = 15.0f;  // 1/s: squeal comes and goes quickly
 	constexpr float ImpactDecaySeconds = 0.12f;
 	constexpr float ThumpHz = 58.0f;
+	constexpr float SquealHz = 1700.0f;    // tyre squeal pitch, wobbling a little
+	constexpr float SquealWobbleHz = 7.0f;
+	constexpr float SquealWobbleDepthHz = 140.0f;
 
 	float WhiteNoise(uint32& State)
 	{
@@ -35,14 +39,16 @@ bool URaceEngineSynth::Init(int32& InSampleRate)
 	return true;
 }
 
-void URaceEngineSynth::SetEngineState(float SpeedAlpha, float InLoad)
+void URaceEngineSynth::SetEngineState(float SpeedAlpha, float InLoad, float InSkid)
 {
-	const float NewRpm = FMath::Clamp(SpeedAlpha, 0.0f, 1.0f);
+	const float NewRpm = FMath::Clamp(SpeedAlpha, 0.0f, 1.3f); // above 1 while drafting past normal top speed
 	const float NewLoad = FMath::Clamp(InLoad, 0.0f, 1.0f);
-	SynthCommand([this, NewRpm, NewLoad]()
+	const float NewSkid = FMath::Clamp(InSkid, 0.0f, 1.0f);
+	SynthCommand([this, NewRpm, NewLoad, NewSkid]()
 	{
 		TargetRpm = NewRpm;
 		TargetLoad = NewLoad;
+		TargetSkid = NewSkid;
 	});
 }
 
@@ -70,6 +76,7 @@ int32 URaceEngineSynth::OnGenerateAudio(float* OutAudio, int32 NumSamples)
 	const float Dt = 1.0f / SampleRate;
 	const float RpmStep = 1.0f - FMath::Exp(-Dt * RpmResponse);
 	const float LoadStep = 1.0f - FMath::Exp(-Dt * LoadResponse);
+	const float SkidStep = 1.0f - FMath::Exp(-Dt * SkidResponse);
 	const float ImpactDecay = FMath::Exp(-Dt / ImpactDecaySeconds);
 	double SumSquares = 0.0;
 
@@ -77,6 +84,7 @@ int32 URaceEngineSynth::OnGenerateAudio(float* OutAudio, int32 NumSamples)
 	{
 		Rpm += (TargetRpm - Rpm) * RpmStep;
 		Load += (TargetLoad - Load) * LoadStep;
+		Skid += (TargetSkid - Skid) * SkidStep;
 
 		// Engine tone: buzzy sawtooth at the firing frequency plus fundamental and octave for body.
 		const float Hz = (IdleHz + (TopSpeedHz - IdleHz) * Rpm) * PitchScale;
@@ -91,8 +99,22 @@ int32 URaceEngineSynth::OnGenerateAudio(float* OutAudio, int32 NumSamples)
 		RoarFilter += (WhiteNoise(NoiseState) - RoarFilter) * 0.2f;
 		const float Roar = RoarFilter * (1.0f - Phase) * (0.25f + 1.1f * Load);
 
-		const float EngineLevel = 0.35f + 0.45f * Rpm + 0.2f * Load;
+		const float EngineLevel = 0.35f + 0.45f * FMath::Min(Rpm, 1.0f) + 0.2f * Load;
 		float Sample = (Tone * (0.4f + 0.6f * Load) + Roar) * EngineLevel;
+
+		// Tyre squeal: band of hiss (noise minus its low end, softened) plus a wobbling whine.
+		if (Skid > 0.001f)
+		{
+			const float Noise = WhiteNoise(NoiseState);
+			SquealLow += (Noise - SquealLow) * 0.55f;
+			SquealBand += ((Noise - SquealLow) - SquealBand) * 0.45f;
+			SquealWobblePhase += SquealWobbleHz * Dt;
+			SquealWobblePhase -= FMath::FloorToDouble(SquealWobblePhase);
+			SquealPhase += (SquealHz + SquealWobbleDepthHz * FMath::Sin(UE_TWO_PI * float(SquealWobblePhase))) * Dt;
+			SquealPhase -= FMath::FloorToDouble(SquealPhase);
+			const float Whine = FMath::Sin(UE_TWO_PI * float(SquealPhase));
+			Sample += Skid * (0.6f * SquealBand + 0.3f * Whine);
+		}
 
 		// Wall/car hit: bright scrape noise plus a short low thump.
 		if (ImpactEnvelope > 0.001f)

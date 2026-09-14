@@ -6,8 +6,8 @@
 #include "RaceEngineSynth.generated.h"
 
 /**
- * Procedural car engine voice (no sound assets). Mono, so the audio engine pans it across the room's
- * speakers by the car's direction from the listener. Pitch follows speed, roar follows throttle,
+ * Procedural car voice (no sound assets). Mono, so the audio engine pans it across the room's speakers by the
+ * car's direction from the listener. Pitch follows speed, roar follows throttle, tyres squeal when sliding,
  * and TriggerImpact adds a scrape/thump burst.
  */
 UCLASS(ClassGroup = Race, meta = (BlueprintSpawnableComponent))
@@ -18,8 +18,11 @@ class XRP_TOPDOWNRACE_API URaceEngineSynth : public USynthComponent
 public:
 	URaceEngineSynth(const FObjectInitializer& ObjectInitializer);
 
-	/** Game thread. SpeedAlpha: 0..1 of top speed. Load: 0..1 (throttle or brake held). */
-	void SetEngineState(float SpeedAlpha, float Load);
+	/**
+	 * Game thread. SpeedAlpha: fraction of normal top speed (up to 1.3 in a slipstream).
+	 * Load: 0..1 (throttle or brake held). Skid: 0..1 tyre squeal (sliding sideways, handbrake).
+	 */
+	void SetEngineState(float SpeedAlpha, float Load, float Skid = 0.0f);
 
 	/** Game thread. Strength 0..1. */
 	void TriggerImpact(float Strength);
@@ -39,14 +42,20 @@ private:
 	float SampleRate = 48000.0f;
 	double EnginePhase = 0.0;
 	double ThumpPhase = 0.0;
+	double SquealPhase = 0.0;
+	double SquealWobblePhase = 0.0;
 	float Rpm = 0.0f;
 	float TargetRpm = 0.0f;
 	float Load = 0.0f;
 	float TargetLoad = 0.0f;
+	float Skid = 0.0f;
+	float TargetSkid = 0.0f;
 	float PitchScale = 1.0f;
 	float ImpactEnvelope = 0.0f;
 	float RoarFilter = 0.0f;
 	float ScrapeFilter = 0.0f;
+	float SquealLow = 0.0f;
+	float SquealBand = 0.0f;
 	uint32 NoiseState = 0x9E3779B9u;
 
 	std::atomic<float> RecentLevel{ 0.0f };

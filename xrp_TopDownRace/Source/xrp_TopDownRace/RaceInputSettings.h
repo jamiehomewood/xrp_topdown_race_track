@@ -24,9 +24,21 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Input")
 	bool bKeyboardInputEnabled = true;
 
+	/** Laps in a race. The first car to complete them wins; the rest get a short time to finish. */
+	UPROPERTY(Config, EditAnywhere, Category = "Race", meta = (ClampMin = "1", ClampMax = "50"))
+	int32 RaceLaps = 5;
+
+	/** Slipstream: a car close behind another goes faster, so it can pull out and overtake. */
+	UPROPERTY(Config, EditAnywhere, Category = "Race")
+	bool bDraftingEnabled = true;
+
 	/** Left-stick values below this are ignored. */
 	UPROPERTY(Config, EditAnywhere, Category = "Input", meta = (ClampMin = "0.0", ClampMax = "0.9"))
 	float StickDeadZone = 0.2f;
+
+	/** Seconds without any input before a player's car goes back to computer control (0 = never). */
+	UPROPERTY(Config, EditAnywhere, Category = "Input", meta = (ClampMin = "0.0"))
+	float IdleReleaseSeconds = 60.0f;
 
 	/**
 	 * Render resolution (%) of the desktop game window. The Igloo Manager's Spout cameras are scene captures
