@@ -1,0 +1,44 @@
+{
+    "FileVersion":  3,
+    "EngineAssociation":  "5.7",
+    "Category":  "",
+    "Description":  "",
+    "Modules":  [
+                    {
+                        "Name":  "xrp_TopDownRace",
+                        "Type":  "Runtime",
+                        "LoadingPhase":  "Default"
+                    }
+                ],
+    "Plugins":  [
+                    {
+                        "Name":  "ModelingToolsEditorMode",
+                        "Enabled":  true,
+                        "TargetAllowList":  [
+                                                "Editor"
+                                            ]
+                    },
+                    {
+                        "Name":  "GameplayStateTree",
+                        "Enabled":  true
+                    },
+                    {
+                        "Name":  "IglooUnrealToolkit",
+                        "Enabled":  true
+                    },
+                    {
+                        "Name":  "PythonScriptPlugin",
+                        "Enabled":  true,
+                        "TargetAllowList":  [
+                                                "Editor"
+                                            ]
+                    },
+                    {
+                        "Name":  "EditorScriptingUtilities",
+                        "Enabled":  true,
+                        "TargetAllowList":  [
+                                                "Editor"
+                                            ]
+                    }
+                ]
+}

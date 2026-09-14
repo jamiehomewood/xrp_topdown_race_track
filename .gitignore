@@ -1,0 +1,23 @@
+# Source copy of the plugin; the project loads xrp_TopDownRace/Plugins/IglooUnrealToolkit
+/IglooUnrealToolkit/
+
+# Unreal generated / per-machine
+xrp_TopDownRace/Intermediate/
+xrp_TopDownRace/Saved/
+xrp_TopDownRace/DerivedDataCache/
+xrp_TopDownRace/Plugins/*/Intermediate/
+xrp_TopDownRace/.vs/
+xrp_TopDownRace/*.sln
+*.pdb
+
+# Project binaries: keep only the editor module so the project opens without Visual Studio
+xrp_TopDownRace/Binaries/*
+!xrp_TopDownRace/Binaries/Win64/
+xrp_TopDownRace/Binaries/Win64/*
+!xrp_TopDownRace/Binaries/Win64/UnrealEditor-xrp_TopDownRace.dll
+!xrp_TopDownRace/Binaries/Win64/UnrealEditor.modules
+
+# Tooling
+__pycache__/
+*.pyc
+xrp_TopDownRace/Tools/TrackGen/track_preview.svg
