@@ -20,6 +20,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "RaceCarPawn.h"
+#include "RaceCelebration.h"
 #include "RaceDisplay.h"
 #include "RaceEngineSynth.h"
 #include "RaceInputSettings.h"
@@ -38,7 +39,7 @@ namespace
 
 	TAutoConsoleVariable<FString> CVarRaceCaptureAt(
 		TEXT("race.CaptureAt"), TEXT(""),
-		TEXT("Test aid: comma-separated seconds after start (e.g. \"8,40\") at which to save the Igloo floor/wall camera images to Saved/RaceCaptures and take a desktop screenshot."));
+		TEXT("Test aid: comma- or plus-separated seconds after start (e.g. \"8,40\", or \"8+40\" inside -ExecCmds) at which to save the Igloo floor/wall camera images to Saved/RaceCaptures and take a desktop screenshot."));
 
 	TAutoConsoleVariable<float> CVarRaceRecordAudio(
 		TEXT("race.RecordAudio"), 0.0f,
@@ -63,6 +64,11 @@ namespace
 	constexpr float SpeakerTestStepSeconds = 1.5f;
 	constexpr int32 MinRoomAudioChannels = 6;
 
+	// Winner fanfare: a rising arpeggio, then the top note again, held.
+	constexpr float FanfareNotesHz[] = { 523.25f, 659.25f, 783.99f, 1046.5f, 783.99f, 1046.5f };
+	constexpr float FanfareNoteTimes[] = { 0.0f, 0.15f, 0.3f, 0.45f, 0.8f, 0.95f };
+	constexpr float FanfareNoteSeconds[] = { 0.14f, 0.14f, 0.14f, 0.3f, 0.14f, 1.0f };
+
 	TAutoConsoleVariable<int32> CVarRaceIglooCameraReport(
 		TEXT("race.IglooCameraReport"), 0,
 		TEXT("Log each Igloo capture camera's direction, capture mode and sampled image brightness 8 seconds into play."));
@@ -79,8 +85,7 @@ namespace
 	constexpr float LightInterval = 1.0f;
 	constexpr float LightsHoldMin = 0.4f;
 	constexpr float LightsHoldMax = 2.0f;
-	constexpr float FinishGraceSeconds = 15.0f;
-	constexpr float ResultsSeconds = 8.0f;
+	constexpr float ResultsSeconds = 11.0f;    // winner show before the next race's grid
 	constexpr float GoBannerSeconds = 2.0f;
 
 	// Sector gates as fractions of the lap; a lap only counts after passing both in order.
@@ -140,6 +145,13 @@ namespace
 		return Colors[FMath::Abs(Slot) % UE_ARRAY_COUNT(Colors)];
 	}
 
+	/** Ordering key for a finished car: ahead of any car still racing, in finishing order. Steps are far larger
+	 *  than float spacing at this size (1e9 - 1 and 1e9 - 2 are the same float, which scrambled the results). */
+	float FinishedRaceDistance(int32 FinishPosition)
+	{
+		return 1.0e8f - FinishPosition * 1000.0f;
+	}
+
 	FColor Dimmed(FColor Color)
 	{
 		return FColor(Color.R * 7 / 10, Color.G * 7 / 10, Color.B * 7 / 10);
@@ -152,7 +164,6 @@ namespace
 		case ERacePhase::GetReady: return TEXT("GetReady");
 		case ERacePhase::Lights: return TEXT("Lights");
 		case ERacePhase::Racing: return TEXT("Racing");
-		case ERacePhase::Finishing: return TEXT("Finishing");
 		case ERacePhase::Results: return TEXT("Results");
 		}
 		return TEXT("?");
@@ -364,6 +375,8 @@ void ARaceGameMode::SpawnRaceProps()
 			}
 		}
 	}
+
+	Celebration = GetWorld()->SpawnActor<ARaceCelebration>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
 }
 
 float ARaceGameMode::Now() const
@@ -449,23 +462,14 @@ void ARaceGameMode::UpdateRacePhase(float DeltaSeconds)
 		break;
 
 	case ERacePhase::Racing:
-		break;
-
-	case ERacePhase::Finishing:
-	{
-		bool bEveryoneDone = true;
-		for (int32 Slot = 0; Slot < Cars.Num(); ++Slot)
-		{
-			bEveryoneDone &= Stats[Slot].bFinished;
-		}
-		if (bEveryoneDone || PhaseTime >= FinishGraceSeconds)
-		{
-			EnterPhase(ERacePhase::Results);
-		}
-		break;
-	}
+		break; // ends in UpdateLapsAndPositions when a car completes the last lap
 
 	case ERacePhase::Results:
+		while (FanfareNote < UE_ARRAY_COUNT(FanfareNotesHz) && PhaseTime >= FanfareNoteTimes[FanfareNote])
+		{
+			PlaySignal(FanfareNotesHz[FanfareNote], FanfareNoteSeconds[FanfareNote]);
+			++FanfareNote;
+		}
 		if (PhaseTime >= ResultsSeconds)
 		{
 			EnterPhase(ERacePhase::GetReady);
@@ -484,8 +488,10 @@ void ARaceGameMode::EnterPhase(ERacePhase NewPhase)
 	{
 	case ERacePhase::GetReady:
 		RandomiseCarModels();
+		if (Celebration) { Celebration->Stop(); }
 		for (int32 Slot = 0; Slot < Cars.Num(); ++Slot)
 		{
+			Cars[Slot]->SetCoasting(false);
 			Cars[Slot]->PlaceOnGrid(GridSlots.IsValidIndex(Slot) ? GridSlots[Slot] : FTransform::Identity);
 			Cars[Slot]->SetControlsLocked(true);
 			Stats[Slot] = FRaceCarStats();
@@ -502,7 +508,6 @@ void ARaceGameMode::EnterPhase(ERacePhase NewPhase)
 		break;
 
 	case ERacePhase::Racing:
-		FinishCount = 0;
 		WinnerSlot = INDEX_NONE;
 		bHavePreviousRaceDistance = false;
 		for (int32 Slot = 0; Slot < Cars.Num(); ++Slot)
@@ -517,13 +522,16 @@ void ARaceGameMode::EnterPhase(ERacePhase NewPhase)
 		PlaySignal(GoBeepHz, GoBeepSeconds);
 		break;
 
-	case ERacePhase::Finishing:
-		break;
-
 	case ERacePhase::Results:
+		// Race over: nobody can drive on, everyone rolls to a stop under the confetti.
+		FanfareNote = 0;
 		for (const TObjectPtr<ARaceCarPawn>& Car : Cars)
 		{
-			Car->SetControlsLocked(true);
+			Car->SetCoasting(true);
+		}
+		if (Celebration && Cars.IsValidIndex(WinnerSlot))
+		{
+			Celebration->Celebrate(GetWinnerText(), SlotColor(WinnerSlot));
 		}
 		break;
 	}
@@ -534,8 +542,9 @@ void ARaceGameMode::UpdateLapsAndPositions()
 {
 	const float LapLength = TrackPath.GetLapLength();
 	const int32 RaceLaps = GetDefault<URaceInputSettings>()->RaceLaps;
-	const bool bTiming = Phase == ERacePhase::Racing || Phase == ERacePhase::Finishing;
+	const bool bTiming = Phase == ERacePhase::Racing;
 	const float Time = Now();
+	bool bRaceWon = false;
 
 	TArray<int32> Order;
 	for (int32 Slot = 0; Slot < Cars.Num(); ++Slot)
@@ -566,23 +575,17 @@ void ARaceGameMode::UpdateLapsAndPositions()
 					S.LapStartTime = Time;
 					UE_LOG(LogRace, Log, TEXT("race.Lap car %d (%s) completed lap %d in %.2f s (best %.2f)"),
 						Slot + 1, Car->IsPlayerControlled() ? TEXT("player") : TEXT("cpu"), S.Lap, S.LastLapTime, S.BestLapTime);
-					if (S.Lap >= RaceLaps)
-					{
-						S.bFinished = true;
-						S.FinishPosition = ++FinishCount;
-						UE_LOG(LogRace, Log, TEXT("race.Finish car %d position %d"), Slot + 1, S.FinishPosition);
-						if (WinnerSlot == INDEX_NONE)
-						{
-							WinnerSlot = Slot;
-						}
-						if (Phase == ERacePhase::Racing)
-						{
-							EnterPhase(ERacePhase::Finishing);
-						}
-					}
-					else
+					if (S.Lap < RaceLaps)
 					{
 						++S.Lap;
+					}
+					else if (WinnerSlot == INDEX_NONE)
+					{
+						// First over the line on the last lap wins, and that ends the race.
+						S.bFinished = true;
+						S.FinishPosition = 1;
+						WinnerSlot = Slot;
+						bRaceWon = true;
 					}
 				}
 				S.Checkpoints = 0;
@@ -593,7 +596,7 @@ void ARaceGameMode::UpdateLapsAndPositions()
 		S.bHasProgress = true;
 		// Still behind the line (on the grid) counts as negative progress rather than nearly a full lap.
 		const float Along = (S.Checkpoints == 0 && P > 0.8f * LapLength) ? P - LapLength : P;
-		S.RaceDistance = S.bFinished ? 1.0e9f - S.FinishPosition : FMath::Max(S.Lap - 1, 0) * LapLength + Along;
+		S.RaceDistance = S.bFinished ? FinishedRaceDistance(S.FinishPosition) : FMath::Max(S.Lap - 1, 0) * LapLength + Along;
 		Order.Add(Slot);
 	}
 
@@ -601,6 +604,23 @@ void ARaceGameMode::UpdateLapsAndPositions()
 	for (int32 Index = 0; Index < Order.Num(); ++Index)
 	{
 		Stats[Order[Index]].Position = Index + 1;
+	}
+
+	if (bRaceWon)
+	{
+		// Everyone else is placed where they are on the road when the winner crosses the line.
+		TArray<FString> Result;
+		for (int32 Index = 0; Index < Order.Num(); ++Index)
+		{
+			FRaceCarStats& S = Stats[Order[Index]];
+			S.bFinished = true;
+			S.FinishPosition = Index + 1;
+			S.RaceDistance = FinishedRaceDistance(S.FinishPosition);
+			Result.Add(FString::Printf(TEXT("P%d car %d (%s)"), Index + 1, Order[Index] + 1,
+				Cars[Order[Index]]->IsPlayerControlled() ? TEXT("player") : TEXT("cpu")));
+		}
+		UE_LOG(LogRace, Log, TEXT("race.Finish %s: %s"), *GetWinnerText(), *FString::Join(Result, TEXT(", ")));
+		EnterPhase(ERacePhase::Results);
 	}
 
 	// Log overtakes between racing cars (used to check the slipstream works).
@@ -634,7 +654,7 @@ void ARaceGameMode::UpdateDrafting()
 	for (const TObjectPtr<ARaceCarPawn>& Follower : Cars)
 	{
 		float Strength = 0.0f;
-		if (bDraftingOn && !Follower->AreControlsLocked())
+		if (bDraftingOn && Phase == ERacePhase::Racing && !Follower->AreControlsLocked())
 		{
 			const FVector FollowerForward = Follower->GetActorForwardVector().GetSafeNormal2D();
 			const FVector FollowerRight(-FollowerForward.Y, FollowerForward.X, 0.0f);
@@ -789,6 +809,17 @@ void ARaceGameMode::ComputeComputerDriverInput(int32 SlotIndex, float DeltaTime,
 	}
 }
 
+FString ARaceGameMode::GetWinnerText() const
+{
+	if (!Cars.IsValidIndex(WinnerSlot))
+	{
+		return FString();
+	}
+	return Cars[WinnerSlot]->IsPlayerControlled()
+		? FString::Printf(TEXT("PLAYER %d WINS!"), WinnerSlot + 1)
+		: FString::Printf(TEXT("CAR %d WINS!"), WinnerSlot + 1);
+}
+
 void ARaceGameMode::RefreshDisplays()
 {
 	if (!Display)
@@ -797,7 +828,7 @@ void ARaceGameMode::RefreshDisplays()
 	}
 	const int32 RaceLaps = GetDefault<URaceInputSettings>()->RaceLaps;
 	const float Time = Now();
-	const bool bRaceRunning = Phase == ERacePhase::Racing || Phase == ERacePhase::Finishing || Phase == ERacePhase::Results;
+	const bool bRaceRunning = Phase == ERacePhase::Racing || Phase == ERacePhase::Results;
 
 	TArray<int32> Order;
 	for (int32 Slot = 0; Slot < Cars.Num(); ++Slot)
@@ -830,7 +861,7 @@ void ARaceGameMode::RefreshDisplays()
 		}
 		else if (S.bFinished)
 		{
-			Lines[1] = FString::Printf(TEXT("FINISHED P%d"), S.FinishPosition);
+			Lines[1] = S.FinishPosition == 1 ? FString(TEXT("WINNER!")) : FString::Printf(TEXT("FINISHED P%d"), S.FinishPosition);
 			Lines[2] = FString::Printf(TEXT("BEST %s"), *FormatTime(S.BestLapTime));
 		}
 		else
@@ -870,13 +901,10 @@ void ARaceGameMode::RefreshDisplays()
 			Banner = FString::Printf(TEXT("LAP %d / %d"), FMath::Clamp(Stats[Order[0]].Lap, 1, RaceLaps), RaceLaps);
 		}
 		break;
-	case ERacePhase::Finishing:
 	case ERacePhase::Results:
 		if (WinnerSlot != INDEX_NONE)
 		{
-			Banner = Cars[WinnerSlot]->IsPlayerControlled()
-				? FString::Printf(TEXT("PLAYER %d WINS!"), WinnerSlot + 1)
-				: FString::Printf(TEXT("CAR %d WINS!"), WinnerSlot + 1);
+			Banner = GetWinnerText();
 			BannerColor = SlotColor(WinnerSlot);
 		}
 		break;
@@ -933,7 +961,8 @@ void ARaceGameMode::UpdateCaptures(float DeltaSeconds)
 		}
 		bCaptureTimesParsed = true;
 		TArray<FString> Parts;
-		CVarRaceCaptureAt.GetValueOnGameThread().ParseIntoArray(Parts, TEXT(","), true);
+		// -ExecCmds splits commands on commas, so "+" also separates the times there ("race.CaptureAt 8+40").
+		CVarRaceCaptureAt.GetValueOnGameThread().Replace(TEXT("+"), TEXT(",")).ParseIntoArray(Parts, TEXT(","), true);
 		for (const FString& Part : Parts)
 		{
 			const float Seconds = FCString::Atof(*Part.TrimStartAndEnd());

@@ -46,8 +46,10 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
 
 - Cars line up on the grid, five red lights come on one per second, then all go out after a random pause: go.
   Lights show on a gantry over the start line (floor) and on boards on the front and back walls.
-- `RaceLaps` laps (default 5). Laps only count after passing both sector checkpoints. The first car home wins,
-  the others get 15 s to finish, results show for 8 s, then everyone is back on the grid.
+- `RaceLaps` laps (default 5). Laps only count after passing both sector checkpoints. The race ends the moment
+  the first car completes the last lap: everyone else is placed where they are, all cars roll to a stop, and the
+  winner is celebrated for 11 s — "PLAYER n WINS!" turning slowly above the middle of the track, confetti raining
+  down over the room, a fanfare from every speaker — then everyone is back on the grid.
 - **Slipstream**: right behind another car you gain up to +22 % top speed and +60 % acceleration, so you can
   pull out and pass on the straights (`bDraftingEnabled`).
 - Displays: a floor panel in each room corner (player/CPU, position, lap, lap time, best, DRAFT) and a banner +
@@ -59,7 +61,8 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
 - `race.AutoDrive 1..4` with `race.AutoDriveCars N`: players take cars and drive by themselves — 1 straight,
   2 wall-escape pattern, 3 the computer driver, 4 doughnuts. Logs position, speed, FPS, slipstream and spin.
 - `race.DraftEnabled 0/1` overrides the slipstream setting; `race.CaptureAt 8,40` saves the Igloo floor/wall
-  camera images to `Saved/RaceCaptures` at those times.
+  camera images to `Saved/RaceCaptures` at those times (inside `-ExecCmds`, which splits on commas, write `8+40`).
+- Quick finish test: `-ini:Game:[/Script/xrp_TopDownRace.RaceInputSettings]:RaceLaps=1` gives one-lap races.
 
 ## Performance
 

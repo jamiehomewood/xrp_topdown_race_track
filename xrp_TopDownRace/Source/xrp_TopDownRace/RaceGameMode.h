@@ -7,6 +7,7 @@
 
 class ACameraActor;
 class ARaceCarPawn;
+class ARaceCelebration;
 class ARaceDisplay;
 class ARacePlayerController;
 class ARaceStartLights;
@@ -19,8 +20,7 @@ enum class ERacePhase : uint8
 	GetReady,   // cars on the grid
 	Lights,     // five red lights come on one by one, then go out at a random moment
 	Racing,
-	Finishing,  // a car has won; the others get a little time to finish
-	Results,    // everyone stopped, winner shown, then back to GetReady
+	Results,    // ends the moment a car completes the last lap: cars roll to a stop, winner show, then back to GetReady
 };
 
 /** Lap timing and race position for one car. */
@@ -131,6 +131,9 @@ private:
 	void DriveComputerCars(float DeltaSeconds);
 	void RefreshDisplays();
 
+	/** "PLAYER n WINS!" / "CAR n WINS!" (empty before anyone has won). */
+	FString GetWinnerText() const;
+
 	/** Finds Igloo's capture cameras (spawned by the IglooManager at BeginPlay) and switches off the ceiling one. */
 	void RefreshIglooCameras();
 	void DisableCapture(USceneCaptureComponent2D* Capture);
@@ -165,8 +168,8 @@ private:
 	ERacePhase Phase = ERacePhase::GetReady;
 	float PhaseTime = 0.0f;
 	float LightsHoldTime = 1.0f;
-	int32 FinishCount = 0;
 	int32 WinnerSlot = INDEX_NONE;
+	int32 FanfareNote = 0;
 	TArray<FRaceCarStats> Stats;
 	TArray<FComputerDriverState> ComputerDrivers;
 	TArray<float> PreviousRaceDistance;
@@ -177,6 +180,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<ARaceDisplay> Display;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ARaceCelebration> Celebration;
 
 	TArray<int32> PanelLines;   // PanelLinesPerSlot floor lines per player slot
 	TArray<int32> WallLines;    // per wall: banner + one row per car

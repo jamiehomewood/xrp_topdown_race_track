@@ -83,6 +83,10 @@ def build_materials():
         light_color.set_editor_property("default_value", unreal.LinearColor(0.05, 0.0, 0.0, 1.0))
         mel.connect_material_property(light_color, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
         mel.recompile_material(light)
+    # Also drives the winner confetti, which is drawn as instanced static meshes.
+    if not light.get_editor_property("used_with_instanced_static_meshes"):
+        light.set_editor_property("used_with_instanced_static_meshes", True)
+        mel.recompile_material(light)
     eal.save_loaded_asset(light)
 
     instances = {}

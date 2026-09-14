@@ -205,8 +205,24 @@ void ARaceCarPawn::ApplyMeshTransform()
 	PlayerMarker->SetRelativeScale3D(FVector(Extent.X * 2.0f * 1.45f / 100.0f, Extent.Y * 2.0f * 2.3f / 100.0f, 0.02f));
 }
 
+void ARaceCarPawn::SetCoasting(bool bInCoasting)
+{
+	bCoasting = bInCoasting;
+	if (bCoasting)
+	{
+		SetDriveInput(0.0f, 0.0f, 0.0f, false);
+	}
+}
+
 void ARaceCarPawn::SetDriveInput(float InThrottle, float InBrake, float InSteer, bool bInHandbrake)
 {
+	if (bCoasting)
+	{
+		InThrottle = 0.0f;
+		InBrake = 0.0f;
+		InSteer = 0.0f;
+		bInHandbrake = false;
+	}
 	Throttle = FMath::Clamp(InThrottle, 0.0f, 1.0f);
 	Brake = FMath::Clamp(InBrake, 0.0f, 1.0f);
 	Steer = FMath::Clamp(InSteer, -1.0f, 1.0f);
@@ -420,7 +436,9 @@ void ARaceCarPawn::Tick(float DeltaSeconds)
 	}
 	if ((Throttle <= 0.0f && Brake <= 0.0f) || bHandbrake)
 	{
-		const float Drag = (bHandbrake ? HandbrakeDrag : 0.0f) + ((Throttle <= 0.0f && Brake <= 0.0f) ? CoastDeceleration : 0.0f);
+		// Once the race is over, roll to a stop in about two seconds from full speed.
+		const float Drag = (bHandbrake ? HandbrakeDrag : 0.0f) + ((Throttle <= 0.0f && Brake <= 0.0f) ? CoastDeceleration : 0.0f) +
+			(bCoasting ? 700.0f : 0.0f);
 		ForwardSpeed = FMath::Sign(ForwardSpeed) * FMath::Max(FMath::Abs(ForwardSpeed) - Drag * Dt, 0.0f);
 	}
 	ForwardSpeed = FMath::Clamp(ForwardSpeed, -MaxReverseSpeed, TopSpeed);

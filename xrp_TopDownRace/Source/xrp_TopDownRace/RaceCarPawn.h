@@ -49,6 +49,9 @@ public:
 	void SetControlsLocked(bool bLocked);
 	bool AreControlsLocked() const { return bControlsLocked; }
 
+	/** Race over: ignore the driver and roll to a stop (it can still be bumped and slide). */
+	void SetCoasting(bool bInCoasting);
+
 	/** Teleport onto a grid slot, stopped. No overlap back-off: the whole grid is placed together. */
 	void PlaceOnGrid(const FTransform& GridTransform);
 
@@ -226,5 +229,6 @@ private:
 	FColor PlayerColor = FColor::White;
 	bool bActive = false;
 	bool bControlsLocked = false;
+	bool bCoasting = false;
 	bool bPlayerControlled = false;
 };
