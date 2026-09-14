@@ -107,10 +107,22 @@ namespace
 	constexpr float DriverStuckSpeed = 120.0f;
 	constexpr float DriverStuckSeconds = 1.0f;
 	constexpr float DriverReverseSeconds = 0.9f;
-	constexpr float DriverSkillMin = 0.85f;
-	constexpr float DriverMistakeGapMin = 4.0f;       // seconds between mistakes for the weakest driver...
-	constexpr float DriverMistakeGapMax = 12.0f;      // ...scaled up to this for the best
-	constexpr float DriverWobbleAtWorstSkill = 0.35f; // steering wobble amplitude at DriverSkillMin
+	constexpr float DriverWobbleAtWorstSkill = 0.35f; // steering wobble amplitude for the slowest driver
+	constexpr float DriverSpinMinSpeed = 700.0f;      // a spin waits for a corner taken at least this fast
+	constexpr float DriverSpinMinCornerAngle = 25.0f;
+	constexpr float DriverSpinRateMin = 380.0f;       // deg/s the car is kicked round at...
+	constexpr float DriverSpinRateMax = 470.0f;
+	constexpr float DriverSpinSeconds = 1.0f;         // ...while the tyres have let go
+	constexpr float DriverSpinRecoverySeconds = 1.8f; // then it gathers itself before racing again
+	constexpr float DriverEaseOffGap = 2500.0f;       // lead over the best player (UU) at which easing off is full
+
+	/** 0 for the slowest computer driver the Race Settings allow, 1 for the fastest. */
+	float DriverSkillAlpha(float Skill)
+	{
+		const URaceInputSettings* Settings = GetDefault<URaceInputSettings>();
+		const float Range = Settings->CpuPaceMax - Settings->CpuPaceMin;
+		return Range > KINDA_SMALL_NUMBER ? FMath::Clamp((Skill - Settings->CpuPaceMin) / Range, 0.0f, 1.0f) : 1.0f;
+	}
 
 	const TCHAR* MistakeName(EDriverMistake Mistake)
 	{
@@ -120,6 +132,7 @@ namespace
 		case EDriverMistake::RunWide: return TEXT("running wide");
 		case EDriverMistake::Oversteer: return TEXT("oversteer");
 		case EDriverMistake::Hesitation: return TEXT("hesitation");
+		case EDriverMistake::Spin: return TEXT("spin");
 		default: return TEXT("none");
 		}
 	}
@@ -496,7 +509,8 @@ void ARaceGameMode::EnterPhase(ERacePhase NewPhase)
 			Cars[Slot]->SetControlsLocked(true);
 			Stats[Slot] = FRaceCarStats();
 			ComputerDrivers[Slot] = FComputerDriverState();
-			ComputerDrivers[Slot].Skill = FMath::FRandRange(DriverSkillMin, 1.0f);
+			const URaceInputSettings* Settings = GetDefault<URaceInputSettings>();
+			ComputerDrivers[Slot].Skill = FMath::FRandRange(Settings->CpuPaceMin, FMath::Max(Settings->CpuPaceMin, Settings->CpuPaceMax));
 			ComputerDrivers[Slot].NextMistakeIn = FMath::FRandRange(3.0f, 9.0f);
 			ComputerDrivers[Slot].WobblePhase = FMath::FRandRange(0.0f, 100.0f);
 		}
@@ -737,7 +751,7 @@ void ARaceGameMode::ComputeComputerDriverInput(int32 SlotIndex, float DeltaTime,
 		OutSteer = Driver.ReverseSteer;
 		return;
 	}
-	Driver.StuckTime = Speed < DriverStuckSpeed ? Driver.StuckTime + DeltaTime : 0.0f;
+	Driver.StuckTime = (Speed < DriverStuckSpeed && Driver.Mistake != EDriverMistake::Spin) ? Driver.StuckTime + DeltaTime : 0.0f;
 	if (Driver.StuckTime > DriverStuckSeconds)
 	{
 		Driver.StuckTime = 0.0f;
@@ -749,27 +763,69 @@ void ARaceGameMode::ComputeComputerDriverInput(int32 SlotIndex, float DeltaTime,
 		return;
 	}
 
-	// Mistakes: every so often (more often for weaker drivers) the driver fluffs something for a moment.
+	// Which way the next corner turns (positive = right), used for running wide and spinning.
+	const float CornerAngleSigned = AngleTo(TrackPath.GetPointAtDistance(Along + 900.0f + Speed * 0.45f));
+	const float CornerAngle = FMath::Abs(CornerAngleSigned);
+	const URaceInputSettings* Settings = GetDefault<URaceInputSettings>();
+	const float SkillAlpha = DriverSkillAlpha(Driver.Skill);
+
+	// Mistakes: every so often (more often for slower drivers) the driver fluffs something.
 	if (Driver.MistakeTimeLeft > 0.0f)
 	{
 		Driver.MistakeTimeLeft -= DeltaTime;
+		if (Driver.Mistake == EDriverMistake::Spin)
+		{
+			Driver.SpinYaw += Car->GetSpinRate() * DeltaTime;
+		}
 		if (Driver.MistakeTimeLeft <= 0.0f)
 		{
+			if (Driver.Mistake == EDriverMistake::Spin)
+			{
+				UE_LOG(LogRace, Log, TEXT("race.Spin car %d turned %.0f deg, speed now %.0f"), SlotIndex + 1, FMath::Abs(Driver.SpinYaw), Speed);
+			}
 			Driver.Mistake = EDriverMistake::None;
+		}
+	}
+	else if (Driver.bSpinPending)
+	{
+		// Waits for a corner taken at speed, then loses the back end completely (tail out, nose into the corner).
+		if (CornerAngle > DriverSpinMinCornerAngle && Speed > DriverSpinMinSpeed)
+		{
+			Driver.bSpinPending = false;
+			Driver.Mistake = EDriverMistake::Spin;
+			Driver.MistakeTimeLeft = DriverSpinSeconds + DriverSpinRecoverySeconds;
+			Driver.SpinYaw = 0.0f;
+			const float SpinDirection = CornerAngleSigned >= 0.0f ? 1.0f : -1.0f;
+			Cars[SlotIndex]->SpinOut(SpinDirection * FMath::FRandRange(DriverSpinRateMin, DriverSpinRateMax), DriverSpinSeconds);
+			UE_LOG(LogRace, Log, TEXT("race.Mistake car %d: spin at %.0f UU/s"), SlotIndex + 1, Speed);
 		}
 	}
 	else if ((Driver.NextMistakeIn -= DeltaTime) <= 0.0f && Speed > 500.0f)
 	{
-		Driver.Mistake = static_cast<EDriverMistake>(FMath::RandRange(1, 4));
-		Driver.MistakeTimeLeft = FMath::FRandRange(0.6f, 1.4f);
-		const float SkillAlpha = (Driver.Skill - DriverSkillMin) / (1.0f - DriverSkillMin);
-		Driver.NextMistakeIn = FMath::Lerp(DriverMistakeGapMin, DriverMistakeGapMax, SkillAlpha) * FMath::FRandRange(0.7f, 1.3f);
-		UE_LOG(LogRace, Log, TEXT("race.Mistake car %d: %s"), SlotIndex + 1, MistakeName(Driver.Mistake));
+		const float GapMin = Settings->CpuMistakeGapMin;
+		const float GapMax = FMath::Max(Settings->CpuMistakeGapMax, GapMin);
+		Driver.NextMistakeIn = FMath::Lerp(GapMin, GapMax, SkillAlpha) * FMath::FRandRange(0.7f, 1.3f);
+		if (FMath::FRand() < Settings->CpuSpinChance)
+		{
+			Driver.bSpinPending = true;
+		}
+		else
+		{
+			Driver.Mistake = static_cast<EDriverMistake>(FMath::RandRange(1, 4));
+			Driver.MistakeTimeLeft = FMath::FRandRange(0.6f, 1.4f);
+			UE_LOG(LogRace, Log, TEXT("race.Mistake car %d: %s"), SlotIndex + 1, MistakeName(Driver.Mistake));
+		}
 	}
 
-	// Which way the next corner turns (positive = right), used for running wide.
-	const float CornerAngleSigned = AngleTo(TrackPath.GetPointAtDistance(Along + 900.0f + Speed * 0.45f));
-	const float CornerAngle = FMath::Abs(CornerAngleSigned);
+	// Spinning: along for the ride with the brake on, then off the brake and gathering it up towards the track.
+	if (Driver.Mistake == EDriverMistake::Spin)
+	{
+		const bool bStillSpinning = Driver.MistakeTimeLeft > DriverSpinRecoverySeconds;
+		OutBrake = (bStillSpinning && Speed > 300.0f) ? 0.4f : 0.0f;
+		OutThrottle = bStillSpinning ? 0.0f : 0.5f;
+		OutSteer = bStillSpinning ? 0.0f : FMath::Clamp(AngleTo(Aim) / 25.0f, -1.0f, 1.0f);
+		return;
+	}
 
 	// Deep in a slipstream means tucked right behind someone: move across to pass (even slots right, odd left).
 	const float PassSide = (SlotIndex % 2 == 0) ? 1.0f : -1.0f;
@@ -783,18 +839,38 @@ void ARaceGameMode::ComputeComputerDriverInput(int32 SlotIndex, float DeltaTime,
 
 	// Imperfect hands: a slow wobble that grows as skill drops.
 	Driver.WobblePhase += DeltaTime;
-	const float SkillAlpha = (Driver.Skill - DriverSkillMin) / (1.0f - DriverSkillMin);
 	const float Wobble = DriverWobbleAtWorstSkill * (1.0f - SkillAlpha) *
 		(FMath::Sin(Driver.WobblePhase * 1.7f) * 0.6f + FMath::Sin(Driver.WobblePhase * 4.3f + 1.3f) * 0.4f);
 	OutSteer = FMath::Clamp(AngleTo(Aim) / 25.0f + Wobble, -1.0f, 1.0f);
 
-	// Look further ahead to judge the next corner and slow down for it; skill scales corner and top speed.
-	float CornerSpeed = (CornerAngle > 55.0f ? 850.0f : (CornerAngle > 30.0f ? 1250.0f : TNumericLimits<float>::Max())) * Driver.Skill;
+	// Ease off when ahead of the best-placed player, so a player who drives well can catch up (only while someone plays).
+	float Pace = Driver.Skill;
+	if (Settings->bCpuEaseOffWhenAhead && Phase == ERacePhase::Racing && Stats.IsValidIndex(SlotIndex))
+	{
+		bool bAnyPlayer = false;
+		float BestPlayerDistance = 0.0f;
+		for (int32 Other = 0; Other < Cars.Num(); ++Other)
+		{
+			if (Other != SlotIndex && Cars[Other]->IsPlayerControlled())
+			{
+				BestPlayerDistance = bAnyPlayer ? FMath::Max(BestPlayerDistance, Stats[Other].RaceDistance) : Stats[Other].RaceDistance;
+				bAnyPlayer = true;
+			}
+		}
+		if (bAnyPlayer)
+		{
+			const float Lead = Stats[SlotIndex].RaceDistance - BestPlayerDistance;
+			Pace *= FMath::Lerp(1.0f, Settings->CpuEaseOffPace, FMath::Clamp(Lead / DriverEaseOffGap, 0.0f, 1.0f));
+		}
+	}
+
+	// Look further ahead to judge the next corner and slow down for it; pace scales corner and top speed.
+	float CornerSpeed = (CornerAngle > 55.0f ? 850.0f : (CornerAngle > 30.0f ? 1250.0f : TNumericLimits<float>::Max())) * Pace;
 	if (Driver.Mistake == EDriverMistake::LateBraking)
 	{
 		CornerSpeed *= 1.45f;
 	}
-	const float TopSpeed = Car->MaxSpeed * (1.0f + Car->DraftTopSpeedBonus * Car->GetDraftFactor()) * Driver.Skill;
+	const float TopSpeed = Car->MaxSpeed * (1.0f + Car->DraftTopSpeedBonus * Car->GetDraftFactor()) * Pace;
 	OutThrottle = (Speed < CornerSpeed && Speed < TopSpeed) ? 1.0f : 0.0f;
 	OutBrake = Speed > CornerSpeed + 250.0f ? 0.7f : 0.0f;
 

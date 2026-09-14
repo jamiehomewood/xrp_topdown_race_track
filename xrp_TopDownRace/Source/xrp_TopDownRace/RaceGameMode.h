@@ -47,6 +47,7 @@ enum class EDriverMistake : uint8
 	RunWide,       // drifts to the outside of the corner
 	Oversteer,     // snaps the back out mid-corner
 	Hesitation,    // lifts off the throttle
+	Spin,          // loses the back end in a corner and goes right round (waits for a corner taken at speed)
 };
 
 /** The computer driver's memory for one car. */
@@ -56,9 +57,11 @@ struct FComputerDriverState
 	float StuckTime = 0.0f;
 	float ReverseTime = 0.0f;    // backing out of a wall / pile-up
 	float ReverseSteer = 1.0f;
-	float Skill = 1.0f;          // scales cornering, top speed and how often mistakes happen; re-rolled each race
+	float Skill = 1.0f;          // pace (Race Settings CpuPaceMin..Max): scales cornering, top speed and mistake gaps; re-rolled each race
 	EDriverMistake Mistake = EDriverMistake::None;
 	float MistakeTimeLeft = 0.0f;
+	bool bSpinPending = false;   // a spin is due at the next corner taken at speed
+	float SpinYaw = 0.0f;        // degrees turned during the current spin (logged)
 	float NextMistakeIn = 6.0f;
 	float WobblePhase = 0.0f;
 };

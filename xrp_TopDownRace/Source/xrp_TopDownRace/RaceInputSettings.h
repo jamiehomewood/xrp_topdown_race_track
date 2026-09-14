@@ -24,13 +24,44 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Input")
 	bool bKeyboardInputEnabled = true;
 
-	/** Laps in a race. The first car to complete them wins; the rest get a short time to finish. */
+	/** Laps in a race. The race ends as soon as the first car completes them. */
 	UPROPERTY(Config, EditAnywhere, Category = "Race", meta = (ClampMin = "1", ClampMax = "50"))
 	int32 RaceLaps = 5;
 
 	/** Slipstream: a car close behind another goes faster, so it can pull out and overtake. */
 	UPROPERTY(Config, EditAnywhere, Category = "Race")
 	bool bDraftingEnabled = true;
+
+	/**
+	 * Pace of the computer drivers. Each race every CPU car gets a random fraction of full pace (top speed and
+	 * cornering speed) between CpuPaceMin and CpuPaceMax.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Computer Drivers", meta = (ClampMin = "0.3", ClampMax = "1.0"))
+	float CpuPaceMin = 0.78f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Computer Drivers", meta = (ClampMin = "0.3", ClampMax = "1.0"))
+	float CpuPaceMax = 0.9f;
+
+	/** Seconds between a CPU driver's mistakes: the slowest driver at the min, the fastest at the max (+-30% random). */
+	UPROPERTY(Config, EditAnywhere, Category = "Computer Drivers", meta = (ClampMin = "0.5"))
+	float CpuMistakeGapMin = 3.0f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Computer Drivers", meta = (ClampMin = "0.5"))
+	float CpuMistakeGapMax = 7.0f;
+
+	/** Share of mistakes that are a full spin in a corner (the others: braking late, running wide, a twitch, lifting off). */
+	UPROPERTY(Config, EditAnywhere, Category = "Computer Drivers", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float CpuSpinChance = 0.35f;
+
+	/**
+	 * While a player is racing, CPU cars ahead of the best-placed player ease off, down to CpuEaseOffPace of their
+	 * pace when a sixth of a lap ahead, so a player who drives well can catch up and win.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Computer Drivers")
+	bool bCpuEaseOffWhenAhead = true;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Computer Drivers", meta = (ClampMin = "0.3", ClampMax = "1.0"))
+	float CpuEaseOffPace = 0.85f;
 
 	/** Left-stick values below this are ignored. */
 	UPROPERTY(Config, EditAnywhere, Category = "Input", meta = (ClampMin = "0.0", ClampMax = "0.9"))

@@ -148,6 +148,7 @@ void ARaceCarPawn::SetControlsLocked(bool bLocked)
 	{
 		Velocity = FVector::ZeroVector;
 		AngularVelocity = 0.0f;
+		SpinOutTime = 0.0f;
 	}
 }
 
@@ -212,6 +213,12 @@ void ARaceCarPawn::SetCoasting(bool bInCoasting)
 	{
 		SetDriveInput(0.0f, 0.0f, 0.0f, false);
 	}
+}
+
+void ARaceCarPawn::SpinOut(float DegreesPerSecond, float Seconds)
+{
+	AngularVelocity = FMath::Clamp(DegreesPerSecond, -MaxSpinRate, MaxSpinRate);
+	SpinOutTime = Seconds;
 }
 
 void ARaceCarPawn::SetDriveInput(float InThrottle, float InBrake, float InSteer, bool bInHandbrake)
@@ -376,6 +383,7 @@ void ARaceCarPawn::Tick(float DeltaSeconds)
 	const float Dt = FMath::Min(DeltaSeconds, 1.0f / 20.0f);
 	TimeSinceWallHit += Dt;
 	TimeSinceImpactSound += Dt;
+	SpinOutTime = FMath::Max(0.0f, SpinOutTime - Dt);
 
 	const float DraftRate = DraftTarget > DraftFactor ? DraftBuildRate : DraftFadeRate;
 	DraftFactor += (DraftTarget - DraftFactor) * (1.0f - FMath::Exp(-DraftRate * Dt));
@@ -418,7 +426,8 @@ void ARaceCarPawn::Tick(float DeltaSeconds)
 	const float SteerRate = Steer * TurnRate * SteerScale * (bReversing ? -1.0f : 1.0f);
 	// Snappy while the stick is held (the player is in charge); spin from a hit only settles slowly when not steering.
 	const bool bSteering = FMath::Abs(Steer) > 0.05f;
-	const float YawResponse = bHandbrake ? SpinRecovery * 0.4f : (bSteering ? SteerResponse : SpinRecovery);
+	// Spun out: the car keeps rotating on the momentum it was given until the tyres bite again.
+	const float YawResponse = SpinOutTime > 0.0f ? 0.6f : (bHandbrake ? SpinRecovery * 0.4f : (bSteering ? SteerResponse : SpinRecovery));
 	AngularVelocity = FMath::FInterpTo(AngularVelocity, SteerRate, Dt, YawResponse);
 	ApplyYaw(AngularVelocity * Dt);
 	Forward = GetActorForwardVector().GetSafeNormal2D();
@@ -446,7 +455,7 @@ void ARaceCarPawn::Tick(float DeltaSeconds)
 	// Lateral: bleed off sideways slide. Low grip (handbrake) keeps the car sliding in its old direction.
 	float LateralSpeed = FVector::DotProduct(Velocity, Right);
 	const float SlideSpeed = FMath::Abs(LateralSpeed);
-	LateralSpeed = FMath::FInterpTo(LateralSpeed, 0.0f, Dt, bHandbrake ? HandbrakeGrip : Grip);
+	LateralSpeed = FMath::FInterpTo(LateralSpeed, 0.0f, Dt, (bHandbrake || SpinOutTime > 0.0f) ? HandbrakeGrip : Grip);
 	Velocity = Forward * ForwardSpeed + Right * LateralSpeed;
 
 	// Move with sweep; on impact, bounce and spin, then slide along whatever we hit.

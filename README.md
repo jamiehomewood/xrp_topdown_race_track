@@ -54,7 +54,12 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   pull out and pass on the straights (`bDraftingEnabled`).
 - Displays: a floor panel in each room corner (player/CPU, position, lap, lap time, best, DRAFT) and a banner +
   leaderboard on the front and back walls.
-- Project Settings › Game › Race Settings: laps, slipstream, input toggles, idle release, audio, performance.
+- **Computer drivers** (Race Settings › Computer Drivers, or `DefaultGame.ini`): each race every CPU car gets a
+  random pace between `CpuPaceMin` and `CpuPaceMax` (0.78–0.9 of full speed), makes a mistake every
+  `CpuMistakeGapMin`–`CpuMistakeGapMax` seconds (3–7), and `CpuSpinChance` (35 %) of those are a full spin in a
+  corner. With `bCpuEaseOffWhenAhead`, CPU cars ahead of the best-placed player slow to `CpuEaseOffPace` (0.85) so
+  players can catch up. Raise the pace values if the CPUs get too easy.
+- Project Settings › Game › Race Settings: laps, slipstream, computer drivers, input toggles, idle release, audio, performance.
 
 ### Test aids (console / `-ExecCmds`)
 

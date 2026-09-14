@@ -52,6 +52,9 @@ public:
 	/** Race over: ignore the driver and roll to a stop (it can still be bumped and slide). */
 	void SetCoasting(bool bInCoasting);
 
+	/** The back end lets go: yaw at DegreesPerSecond (positive = clockwise from above) on almost no grip for Seconds. */
+	void SpinOut(float DegreesPerSecond, float Seconds);
+
 	/** Teleport onto a grid slot, stopped. No overlap back-off: the whole grid is placed together. */
 	void PlaceOnGrid(const FTransform& GridTransform);
 
@@ -230,5 +233,6 @@ private:
 	bool bActive = false;
 	bool bControlsLocked = false;
 	bool bCoasting = false;
+	float SpinOutTime = 0.0f;
 	bool bPlayerControlled = false;
 };
