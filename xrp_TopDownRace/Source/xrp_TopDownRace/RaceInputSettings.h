@@ -35,4 +35,12 @@ public:
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Performance", meta = (ClampMin = "10.0", ClampMax = "100.0"))
 	float DesktopViewScreenPercentage = 50.0f;
+
+	/**
+	 * Render the Igloo Manager's upward-facing (ceiling) capture camera. The room has no ceiling projector, so it
+	 * is off by default: the camera stops capturing and its tile in the Spout feed stays black. The feed layout
+	 * is unchanged, so Igloo Server's warping still lines up.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Performance")
+	bool bRenderIglooCeilingCamera = false;
 };

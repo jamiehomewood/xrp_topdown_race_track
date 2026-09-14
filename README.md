@@ -42,7 +42,9 @@ World scale is **1 physical cm = 10 UU**: the room floor is 5000 × 6000 UU cent
 Igloo renders its capture cameras (6 by default) plus the desktop window every frame, so the renderer is set up
 for cheap views: Lumen GI/reflections, hardware ray tracing, virtual shadow maps and mesh distance fields are off
 (`Config/DefaultEngine.ini`). The desktop window renders at `DesktopViewScreenPercentage` (Race Settings, default
-50 %); Igloo's captures always render at full size. If the room is still slow, lower the Igloo output with
+50 %); Igloo's captures always render at full size. The room has no ceiling projector, so Igloo's upward-facing
+capture camera is switched off at runtime (`bRenderIglooCeilingCamera`, Race Settings); its tile in the Spout feed
+stays black and the feed layout is unchanged. If the room is still slow, lower the Igloo output with
 `-iglooSetResolution` or `-iglooNumCams`.
 
 ## Igloo / Spout

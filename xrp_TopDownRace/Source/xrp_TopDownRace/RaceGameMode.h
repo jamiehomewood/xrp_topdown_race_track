@@ -7,6 +7,7 @@
 class ACameraActor;
 class ARaceCarPawn;
 class ARacePlayerController;
+class USceneCaptureComponent2D;
 class UStaticMesh;
 
 /**
@@ -22,6 +23,7 @@ public:
 	ARaceGameMode();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
 
 	ARaceCarPawn* GetCarForSlot(int32 SlotIndex);
@@ -50,6 +52,20 @@ public:
 
 private:
 	void EnsureCars();
+
+	/** Finds Igloo's capture cameras (spawned by the IglooManager at BeginPlay) and switches off the ceiling one. */
+	void RefreshIglooCameras();
+	void DisableCapture(USceneCaptureComponent2D* Capture);
+
+	/** race.IglooCameraReport: log each Igloo camera's direction and sampled image brightness. */
+	void ReportIglooCameras();
+
+	TArray<TWeakObjectPtr<USceneCaptureComponent2D>> KnownIglooCaptures;
+	TArray<TWeakObjectPtr<USceneCaptureComponent2D>> DisabledCeilingCaptures;
+	float IglooScanTimer = 1.0f;
+	float IglooReportTimer = 0.0f;
+	bool bIglooReported = false;
+	bool bWarnedNoCeilingCamera = false;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<ARaceCarPawn>> Cars;
