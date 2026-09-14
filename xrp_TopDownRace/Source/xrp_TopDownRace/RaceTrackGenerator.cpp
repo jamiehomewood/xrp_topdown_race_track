@@ -22,6 +22,14 @@ namespace
 	constexpr float PlainRectangleChance = 0.25f; // keep only some 4-corner (oval) layouts, they're the least interesting
 	constexpr int32 MaxAttempts = 500;
 
+	// Narrow stretches on straights: about two car widths, so cars have to queue or squeeze through.
+	constexpr double NarrowWidthMin = 300.0;
+	constexpr double NarrowWidthMax = 420.0;
+	constexpr double NarrowLengthMin = 450.0;
+	constexpr double NarrowLengthMax = 900.0;
+	constexpr double NarrowStraightMargin = 60.0;  // full-width road kept at each end of the straight
+	constexpr double GridClearAhead = 250.0;       // road past the start line kept full width
+
 	/** How far the rounded corner at Corner eats into the straights either side of it. */
 	double TangentLength(const FVector2D& Previous, const FVector2D& Corner, const FVector2D& Next)
 	{
@@ -46,7 +54,7 @@ FRaceTrackLayout RaceTrackGenerator::Classic()
 	return Layout;
 }
 
-bool RaceTrackGenerator::Generate(FRandomStream& Random, FRaceTrackLayout& OutLayout)
+bool RaceTrackGenerator::Generate(FRandomStream& Random, FRaceTrackLayout& OutLayout, bool bNarrowSections)
 {
 	for (int32 Attempt = 0; Attempt < MaxAttempts; ++Attempt)
 	{
@@ -204,7 +212,47 @@ bool RaceTrackGenerator::Generate(FRandomStream& Random, FRaceTrackLayout& OutLa
 
 		FRaceTrackLayout Layout;
 		Layout.ControlPoints = Corners;
-		Layout.StartLine = A + Direction * (TangentA + RandomRange(Random, GridRunUp + 60.0, Straight - 150.0));
+		const double StartAlong = TangentA + RandomRange(Random, GridRunUp + 60.0, Straight - 150.0); // along the start side
+		Layout.StartLine = A + Direction * StartAlong;
+
+		// Narrow stretches on random straights (none, one or two), away from the start grid.
+		if (bNarrowSections)
+		{
+			const float NarrowRoll = Random.FRand();
+			const int32 Wanted = NarrowRoll < 0.15f ? 0 : (NarrowRoll < 0.7f ? 1 : 2);
+			TArray<int32> Sides;
+			for (int32 Index = 0; Index < NumCorners; ++Index)
+			{
+				Sides.Insert(Index, Random.RandRange(0, Sides.Num()));
+			}
+			for (int32 CandidateSide : Sides)
+			{
+				if (Layout.Narrowings.Num() >= Wanted)
+				{
+					break;
+				}
+				const FVector2D& From = Corners[CandidateSide];
+				const FVector2D& To = Corners[(CandidateSide + 1) % NumCorners];
+				const FVector2D Along = (To - From).GetSafeNormal();
+				const double StraightStart = TangentLength(Corners[(CandidateSide + NumCorners - 1) % NumCorners], From, To);
+				const double StraightEnd = FVector2D::Distance(From, To) - TangentLength(From, To, Corners[(CandidateSide + 2) % NumCorners]);
+				const double Length = RandomRange(Random, NarrowLengthMin, NarrowLengthMax);
+				const double Reach = Length * 0.5 + FRaceTrackPath::NarrowingTaper + NarrowStraightMargin;
+				if (StraightEnd - StraightStart < 2.0 * Reach)
+				{
+					continue;
+				}
+				const double Centre = RandomRange(Random, StraightStart + Reach, StraightEnd - Reach);
+				if (CandidateSide == Side && Centre + Reach > StartAlong - GridRunUp - 130.0 && Centre - Reach < StartAlong + GridClearAhead)
+				{
+					continue; // would squeeze the start grid
+				}
+				FRaceTrackNarrowing& Narrowing = Layout.Narrowings.AddDefaulted_GetRef();
+				Narrowing.Centre = From + Along * Centre;
+				Narrowing.Length = float(Length);
+				Narrowing.Width = float(RandomRange(Random, NarrowWidthMin, NarrowWidthMax));
+			}
+		}
 
 		// Name: the cell pattern, top row first ('#' = road round it), and the direction.
 		FString Shape;
@@ -220,6 +268,10 @@ bool RaceTrackGenerator::Generate(FRandomStream& Random, FRaceTrackLayout& OutLa
 			}
 		}
 		Layout.Name = FString::Printf(TEXT("%s %s"), *Shape, bClockwise ? TEXT("clockwise") : TEXT("anticlockwise"));
+		if (Layout.Narrowings.Num() > 0)
+		{
+			Layout.Name += FString::Printf(TEXT(" +%d narrow"), Layout.Narrowings.Num());
+		}
 
 		if (Validate(Layout).IsEmpty())
 		{
@@ -250,7 +302,7 @@ FString RaceTrackGenerator::Validate(const FRaceTrackLayout& Layout)
 	}
 
 	FRaceTrackPath Path;
-	Path.Build(Corners, Layout.StartLine);
+	Path.Build(Corners, Layout.StartLine, Layout.Narrowings);
 	for (const FVector2D& Point : Path.GetPoints())
 	{
 		if (FMath::Abs(Point.X) > CentreLimitX + 1.0 || FMath::Abs(Point.Y) > CentreLimitY + 1.0)
@@ -300,6 +352,46 @@ FString RaceTrackGenerator::Validate(const FRaceTrackLayout& Layout)
 	if ((AtLine | BehindGrid) < 0.999 || (AtLine | PastLine) < 0.999)
 	{
 		return TEXT("start grid isn't on a straight");
+	}
+
+	// Narrow stretches: sensible width, on a straight (tapers included), clear of the grid and of each other.
+	const TArray<FRaceTrackPath::FNarrowingSpan>& Spans = Path.GetNarrowingSpans();
+	for (int32 Index = 0; Index < Spans.Num(); ++Index)
+	{
+		const FRaceTrackPath::FNarrowingSpan& Span = Spans[Index];
+		const FRaceTrackNarrowing& Narrowing = Layout.Narrowings[Index];
+		if (Narrowing.Width < NarrowWidthMin - 1.0 || Narrowing.Width > FRaceTrackPath::TrackWidth)
+		{
+			return FString::Printf(TEXT("narrowing %d is %.0f wide"), Index, Narrowing.Width);
+		}
+		if (FVector2D::Distance(Path.GetPointAtDistance(Span.CentreDistance), Narrowing.Centre) > 5.0)
+		{
+			return FString::Printf(TEXT("narrowing %d is off the road"), Index);
+		}
+		const float Reach = Span.HalfLength + FRaceTrackPath::NarrowingTaper;
+		FVector2D AtCentre;
+		FVector2D BeforeTaper;
+		FVector2D AfterTaper;
+		Path.GetPointAtDistance(Span.CentreDistance, &AtCentre);
+		Path.GetPointAtDistance(Span.CentreDistance - Reach - 30.0f, &BeforeTaper);
+		Path.GetPointAtDistance(Span.CentreDistance + Reach + 30.0f, &AfterTaper);
+		if ((AtCentre | BeforeTaper) < 0.999 || (AtCentre | AfterTaper) < 0.999)
+		{
+			return FString::Printf(TEXT("narrowing %d isn't on a straight"), Index);
+		}
+		const float FromLine = Path.WrapDistance(Span.CentreDistance - StartDistance + LapLength * 0.5f) - LapLength * 0.5f;
+		if (FromLine + Reach > -float(GridRunUp + 130.0) && FromLine - Reach < float(GridClearAhead))
+		{
+			return FString::Printf(TEXT("narrowing %d squeezes the start grid"), Index);
+		}
+		for (int32 Other = 0; Other < Index; ++Other)
+		{
+			const float Gap = FMath::Abs(Path.WrapDistance(Span.CentreDistance - Spans[Other].CentreDistance + LapLength * 0.5f) - LapLength * 0.5f);
+			if (Gap < Reach + Spans[Other].HalfLength + FRaceTrackPath::NarrowingTaper + 100.0f)
+			{
+				return FString::Printf(TEXT("narrowings %d and %d overlap"), Other, Index);
+			}
+		}
 	}
 	return FString();
 }

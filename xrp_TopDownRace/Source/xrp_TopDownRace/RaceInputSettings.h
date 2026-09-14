@@ -32,6 +32,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Race")
 	bool bNewTrackEachRace = true;
 
+	/** Random tracks usually get one or two narrow stretches on straights where not every car fits through side by side. */
+	UPROPERTY(Config, EditAnywhere, Category = "Race")
+	bool bNarrowTrackSections = true;
+
 	/** Slipstream: a car close behind another goes faster, so it can pull out and overtake. */
 	UPROPERTY(Config, EditAnywhere, Category = "Race")
 	bool bDraftingEnabled = true;

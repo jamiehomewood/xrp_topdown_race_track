@@ -72,7 +72,14 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   original (outer kerb ~36 cm, fence ~27 cm from the room walls). Each layout is checked before use: inside that footprint,
   straights long enough for the corners, grass between neighbouring stretches of road, a lap of at least 9 m,
   and a straight with room for the grid behind the start line.
+- **Narrow sections** (`bNarrowTrackSections`, on by default; also in the menu): most random tracks get one or
+  two stretches on straights where the road tapers down to 3–4.2 m (in UU, roughly two car widths) with rocks and
+  bushes beside the kerb, so not every car fits through side by side. Never on corners or the start grid. CPU
+  drivers keep inside the narrowed walls and lift for the squeeze (unless they're braking late).
 - Laps, positions, slipstream and the computer drivers all follow whichever track is built.
+- **Mountains**: two overlapping ranges of low-poly mountains and hills all the way round (about 12 km and 21 km
+  out, peaks 5–14° above eye level) hide the flat horizon line on every wall. The horizon itself stays at the Igloo
+  eye height (1.7 m): lowering the cameras would make the floor projection bigger than the room.
 - The level still contains the editor-built original track and floor scenery (Tools/TrackGen); the game hides
   them at start. The trees beyond the walls, the ground and the horizon are shared by every track.
 
@@ -82,7 +89,7 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   button (or B / Esc) closes it. It shows on boards on the front and back walls in the room and on the desktop.
 - Up/Down (stick, D-pad, arrows, W/S) picks a row, Left/Right changes it (hold to repeat), A / Enter runs an action.
   While the menu is open that player's car gets no input; the other cars keep racing.
-- Rows: laps, new track each race, slipstream, CPU pace / mistakes / spins / easing off, top speed, acceleration, steering, grip,
+- Rows: laps, new track each race, narrow sections, slipstream, CPU pace / mistakes / spins / easing off, top speed, acceleration, steering, grip,
   handbrake grip, wall and car bounce, engine and beep volume, idle time before a player's car goes back to the CPU,
   then RESTART RACE, RESET ALL TO DEFAULTS and CLOSE. Changes apply straight away (CPU pace from the next race).
 - Changes are saved when the menu closes, per machine, to `Saved/RaceSettings.ini` (only values that differ from

@@ -18,10 +18,11 @@ FRaceTrackPath::FRaceTrackPath()
 	Build(ClassicControlPoints(), ClassicStartLine());
 }
 
-void FRaceTrackPath::Build(const TArray<FVector2D>& ControlPoints, const FVector2D& StartLine)
+void FRaceTrackPath::Build(const TArray<FVector2D>& ControlPoints, const FVector2D& StartLine, const TArray<FRaceTrackNarrowing>& Narrowings)
 {
 	Points.Reset();
 	CumulativeDistance.Reset();
+	NarrowingSpans.Reset();
 	LapLength = 0.0f;
 	StartLineDistance = 0.0f;
 
@@ -60,6 +61,45 @@ void FRaceTrackPath::Build(const TArray<FVector2D>& ControlPoints, const FVector
 	}
 	LapLength = float(Total);
 	StartLineDistance = GetDistanceAlong(StartLine);
+
+	for (const FRaceTrackNarrowing& Narrowing : Narrowings)
+	{
+		FNarrowingSpan& Span = NarrowingSpans.AddDefaulted_GetRef();
+		Span.CentreDistance = GetDistanceAlong(Narrowing.Centre);
+		Span.HalfLength = Narrowing.Length * 0.5f;
+		Span.HalfWidth = FMath::Min(Narrowing.Width, TrackWidth) * 0.5f;
+	}
+}
+
+float FRaceTrackPath::GetHalfWidthAt(float Distance) const
+{
+	const float FullHalfWidth = TrackWidth * 0.5f;
+	float HalfWidth = FullHalfWidth;
+	for (const FNarrowingSpan& Span : NarrowingSpans)
+	{
+		// Distance from the narrowing's centre, either way round the lap.
+		const float Offset = FMath::Abs(WrapDistance(Distance - Span.CentreDistance + LapLength * 0.5f) - LapLength * 0.5f);
+		if (Offset < Span.HalfLength + NarrowingTaper)
+		{
+			const float Alpha = FMath::Clamp((Offset - Span.HalfLength) / NarrowingTaper, 0.0f, 1.0f);
+			HalfWidth = FMath::Min(HalfWidth, FMath::Lerp(Span.HalfWidth, FullHalfWidth, Alpha));
+		}
+	}
+	return HalfWidth;
+}
+
+TArray<float> FRaceTrackPath::GetWidthBreakDistances() const
+{
+	TArray<float> Breaks;
+	for (const FNarrowingSpan& Span : NarrowingSpans)
+	{
+		for (const float Offset : { -Span.HalfLength - NarrowingTaper, -Span.HalfLength, Span.HalfLength, Span.HalfLength + NarrowingTaper })
+		{
+			Breaks.Add(WrapDistance(Span.CentreDistance + Offset));
+		}
+	}
+	Breaks.Sort();
+	return Breaks;
 }
 
 float FRaceTrackPath::WrapDistance(float Distance) const

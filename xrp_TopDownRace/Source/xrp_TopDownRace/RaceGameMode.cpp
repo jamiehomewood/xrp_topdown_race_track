@@ -25,6 +25,7 @@
 #include "RaceEngineSynth.h"
 #include "RaceHUD.h"
 #include "RaceInputSettings.h"
+#include "RaceMountainRing.h"
 #include "RacePlayerController.h"
 #include "RaceStartLights.h"
 #include "RaceTrackBuilder.h"
@@ -136,6 +137,8 @@ namespace
 	constexpr float DriverSpinSeconds = 1.0f;         // ...while the tyres have let go
 	constexpr float DriverSpinRecoverySeconds = 1.8f; // then it gathers itself before racing again
 	constexpr float DriverEaseOffGap = 2500.0f;       // lead over the best player (UU) at which easing off is full
+	constexpr float DriverWallMargin = 120.0f;        // keep the centre of the car this far inside the kerb when choosing a line
+	constexpr float DriverNarrowSpeed = 1300.0f;      // speed for a narrow stretch ahead (before pace)
 
 	/** 0 for the slowest computer driver the Race Settings allow, 1 for the fastest. */
 	float DriverSkillAlpha(float Skill)
@@ -260,6 +263,7 @@ void ARaceGameMode::BeginPlay()
 	BuilderParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	TrackBuilder = GetWorld()->SpawnActor<ARaceTrackBuilder>(FVector::ZeroVector, FRotator::ZeroRotator, BuilderParams);
 	UE_LOG(LogRace, Log, TEXT("race.Track hid %d level track / floor scenery actors"), ARaceTrackBuilder::HideLevelTrack(GetWorld()));
+	GetWorld()->SpawnActor<ARaceMountainRing>(FVector::ZeroVector, FRotator::ZeroRotator, BuilderParams);
 
 	EnsureCars();
 	SpawnRaceProps();
@@ -889,7 +893,9 @@ void ARaceGameMode::ComputeComputerDriverInput(int32 SlotIndex, float DeltaTime,
 		TargetLane = -FMath::Sign(CornerAngleSigned) * 320.0f; // outside of the corner
 	}
 	Driver.Lane = FMath::FInterpTo(Driver.Lane, TargetLane, DeltaTime, 2.0f);
-	Aim += FVector2D(-Direction.Y, Direction.X) * Driver.Lane;
+	// Stay inside the road where it narrows (both here and at the aim point).
+	const float RoomToSide = FMath::Max(0.0f, FMath::Min(TrackPath.GetHalfWidthAt(Along), TrackPath.GetHalfWidthAt(Along + 350.0f + Speed * 0.3f)) - DriverWallMargin);
+	Aim += FVector2D(-Direction.Y, Direction.X) * FMath::Clamp(Driver.Lane, -RoomToSide, RoomToSide);
 
 	// Imperfect hands: a slow wobble that grows as skill drops.
 	Driver.WobblePhase += DeltaTime;
@@ -923,6 +929,10 @@ void ARaceGameMode::ComputeComputerDriverInput(int32 SlotIndex, float DeltaTime,
 	if (Driver.Mistake == EDriverMistake::LateBraking)
 	{
 		CornerSpeed *= 1.45f;
+	}
+	else if (TrackPath.GetHalfWidthAt(Along + 500.0f + Speed * 0.4f) < FRaceTrackPath::TrackWidth * 0.35f)
+	{
+		CornerSpeed = FMath::Min(CornerSpeed, DriverNarrowSpeed * Pace); // lift for a squeeze ahead
 	}
 	const float TopSpeed = Car->MaxSpeed * (1.0f + Car->DraftTopSpeedBonus * Car->GetDraftFactor()) * Pace;
 	OutThrottle = (Speed < CornerSpeed && Speed < TopSpeed) ? 1.0f : 0.0f;
@@ -1439,7 +1449,7 @@ void ARaceGameMode::ChangeTrack()
 		for (int32 Try = 0; Try < 8; ++Try)
 		{
 			FRaceTrackLayout Candidate;
-			if (RaceTrackGenerator::Generate(Random, Candidate))
+			if (RaceTrackGenerator::Generate(Random, Candidate, GetDefault<URaceInputSettings>()->bNarrowTrackSections))
 			{
 				Layout = MoveTemp(Candidate);
 				if (Layout.Name != CurrentLayout.Name)
@@ -1459,7 +1469,7 @@ void ARaceGameMode::ChangeTrack()
 	}
 
 	CurrentLayout = Layout;
-	TrackPath.Build(Layout.ControlPoints, Layout.StartLine);
+	TrackPath.Build(Layout.ControlPoints, Layout.StartLine, Layout.Narrowings);
 	++TrackNumber;
 	if (TrackBuilder)
 	{
@@ -1533,6 +1543,8 @@ void ARaceGameMode::RunTrackSurvey(int32 Count)
 	float MaxLap = 0.0f;
 	double TotalLap = 0.0;
 	int32 TotalCorners = 0;
+	TMap<int32, int32> NarrowingCounts;
+	float NarrowestWidth = FRaceTrackPath::TrackWidth;
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
 		FRaceTrackLayout Layout;
@@ -1549,7 +1561,12 @@ void ARaceGameMode::RunTrackSurvey(int32 Count)
 			continue;
 		}
 		FRaceTrackPath Path;
-		Path.Build(Layout.ControlPoints, Layout.StartLine);
+		Path.Build(Layout.ControlPoints, Layout.StartLine, Layout.Narrowings);
+		++NarrowingCounts.FindOrAdd(Layout.Narrowings.Num());
+		for (const FRaceTrackNarrowing& Narrowing : Layout.Narrowings)
+		{
+			NarrowestWidth = FMath::Min(NarrowestWidth, Narrowing.Width);
+		}
 		MinLap = FMath::Min(MinLap, Path.GetLapLength());
 		MaxLap = FMath::Max(MaxLap, Path.GetLapLength());
 		TotalLap += Path.GetLapLength();
@@ -1564,6 +1581,8 @@ void ARaceGameMode::RunTrackSurvey(int32 Count)
 	UE_LOG(LogRace, Log, TEXT("race.TrackSurvey %d layouts in %.2f s: %d failed, %d cell shapes (%d with direction), lap %.0f-%.0f UU (mean %.0f), %.1f corners on average; original track check: %s"),
 		Count, FPlatformTime::Seconds() - StartTime, Failed, Shapes.Num(), Named.Num(), MinLap, MaxLap, Good > 0 ? TotalLap / Good : 0.0,
 		Good > 0 ? float(TotalCorners) / Good : 0.0f, ClassicProblem.IsEmpty() ? TEXT("OK") : *ClassicProblem);
+	UE_LOG(LogRace, Log, TEXT("race.TrackSurvey narrow stretches per track: none x%d, one x%d, two x%d; narrowest road %.0f UU"),
+		NarrowingCounts.FindRef(0), NarrowingCounts.FindRef(1), NarrowingCounts.FindRef(2), NarrowestWidth);
 	Shapes.ValueSort([](int32 A, int32 B) { return A > B; });
 	for (const TPair<FString, int32>& Shape : Shapes)
 	{

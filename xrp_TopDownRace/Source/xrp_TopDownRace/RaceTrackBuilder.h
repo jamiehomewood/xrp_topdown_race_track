@@ -31,6 +31,7 @@ public:
 
 private:
 	void BuildFences(const FRaceTrackPath& Path, FRandomStream& Random);
+	void BuildNarrowingScenery(const FRaceTrackPath& Path, FRandomStream& Random);
 	void BuildFloorScenery(const FRaceTrackPath& Path, FRandomStream& Random);
 	void AddProp(const FString& MeshPath, const FVector2D& Location, float Yaw, float Scale, bool bCastShadow);
 

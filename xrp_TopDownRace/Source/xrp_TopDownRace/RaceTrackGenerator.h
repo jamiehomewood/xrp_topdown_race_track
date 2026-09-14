@@ -1,12 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "RaceTrackPath.h"
 
-/** A circuit: its control polygon in race order (corners get rounded) and where the start line goes. */
+/** A circuit: its control polygon in race order (corners get rounded), where the start line goes, and narrow stretches. */
 struct FRaceTrackLayout
 {
 	TArray<FVector2D> ControlPoints;
 	FVector2D StartLine = FVector2D::ZeroVector;
+	TArray<FRaceTrackNarrowing> Narrowings;
 	FString Name;
 };
 
@@ -23,8 +25,8 @@ namespace RaceTrackGenerator
 	/** The original hand-made track. */
 	XRP_TOPDOWNRACE_API FRaceTrackLayout Classic();
 
-	/** A random valid layout; false only if none was found (use Classic then). */
-	XRP_TOPDOWNRACE_API bool Generate(FRandomStream& Random, FRaceTrackLayout& OutLayout);
+	/** A random valid layout, usually with one or two narrow stretches if bNarrowSections; false only if none was found (use Classic then). */
+	XRP_TOPDOWNRACE_API bool Generate(FRandomStream& Random, FRaceTrackLayout& OutLayout, bool bNarrowSections = true);
 
 	/** Why a layout can't be raced on, or an empty string if it's fine. */
 	XRP_TOPDOWNRACE_API FString Validate(const FRaceTrackLayout& Layout);

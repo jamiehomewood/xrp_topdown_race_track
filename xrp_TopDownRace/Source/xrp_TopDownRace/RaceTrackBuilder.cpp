@@ -111,8 +111,11 @@ namespace
 		}
 	};
 
-	/** A closed polyline offset to its left (+Distance) or right (-Distance) with mitred joins (track_geom.offset_loop). */
-	TArray<FVector2D> OffsetLoop(const TArray<FVector2D>& Points, double Distance)
+	/**
+	 * A closed polyline offset to its left (+distance) or right (-distance) with mitred joins (track_geom.offset_loop),
+	 * each point by its own distance.
+	 */
+	TArray<FVector2D> OffsetLoop(const TArray<FVector2D>& Points, const TArray<double>& Distances)
 	{
 		TArray<FVector2D> Out;
 		const int32 Num = Points.Num();
@@ -124,10 +127,17 @@ namespace
 			const FVector2D In = (Point - Previous).GetSafeNormal();
 			const FVector2D OutDirection = (Next - Point).GetSafeNormal();
 			const FVector2D Mitre = FVector2D(-In.Y - OutDirection.Y, In.X + OutDirection.X).GetSafeNormal();
-			const double Scale = Distance / FMath::Max(0.2, Mitre.X * -OutDirection.Y + Mitre.Y * OutDirection.X);
+			const double Scale = Distances[Index] / FMath::Max(0.2, Mitre.X * -OutDirection.Y + Mitre.Y * OutDirection.X);
 			Out.Add(Point + Mitre * Scale);
 		}
 		return Out;
+	}
+
+	TArray<FVector2D> OffsetLoop(const TArray<FVector2D>& Points, double Distance)
+	{
+		TArray<double> Distances;
+		Distances.Init(Distance, Points.Num());
+		return OffsetLoop(Points, Distances);
 	}
 
 	double SignedArea(const TArray<FVector2D>& Loop)
@@ -204,12 +214,39 @@ void ARaceTrackBuilder::Build(const FRaceTrackPath& Path, int32 ScenerySeed)
 	{
 		return;
 	}
-	const float HalfWidth = FRaceTrackPath::TrackWidth * 0.5f;
+	// Centreline with extra points where the road width starts or stops changing, and the half width at each point.
+	TArray<FVector2D> Profile;
+	TArray<double> HalfWidths;
+	const TArray<float> Breaks = Path.GetWidthBreakDistances();
+	for (int32 Index = 0; Index < Centre.Num(); ++Index)
+	{
+		const float From = Path.GetPointDistance(Index);
+		const float To = Index + 1 < Centre.Num() ? Path.GetPointDistance(Index + 1) : Path.GetLapLength();
+		Profile.Add(Centre[Index]);
+		HalfWidths.Add(Path.GetHalfWidthAt(From));
+		for (const float Break : Breaks)
+		{
+			if (Break > From + 1.0f && Break < To - 1.0f)
+			{
+				Profile.Add(Path.GetPointAtDistance(Break));
+				HalfWidths.Add(Path.GetHalfWidthAt(Break));
+			}
+		}
+	}
+	auto Offsets = [&HalfWidths](double Sign, double Extra)
+	{
+		TArray<double> Distances;
+		for (const double HalfWidth : HalfWidths)
+		{
+			Distances.Add(Sign * (HalfWidth + Extra));
+		}
+		return Distances;
+	};
 	const float WallWidth = FRaceTrackPath::WallWidth;
-	const TArray<FVector2D> Left = OffsetLoop(Centre, HalfWidth);
-	const TArray<FVector2D> Right = OffsetLoop(Centre, -HalfWidth);
-	const TArray<FVector2D> LeftBack = OffsetLoop(Centre, HalfWidth + WallWidth);
-	const TArray<FVector2D> RightBack = OffsetLoop(Centre, -HalfWidth - WallWidth);
+	const TArray<FVector2D> Left = OffsetLoop(Profile, Offsets(1.0, 0.0));
+	const TArray<FVector2D> Right = OffsetLoop(Profile, Offsets(-1.0, 0.0));
+	const TArray<FVector2D> LeftBack = OffsetLoop(Profile, Offsets(1.0, WallWidth));
+	const TArray<FVector2D> RightBack = OffsetLoop(Profile, Offsets(-1.0, WallWidth));
 
 	FMeshBuffers Road;
 	AddBand(Road, Left, Right, RoadZ);
@@ -222,12 +259,13 @@ void ARaceTrackBuilder::Build(const FRaceTrackPath& Path, int32 ScenerySeed)
 	FVector2D Direction;
 	const FVector2D StartLine = Path.GetPointAtDistance(Path.GetStartLineDistance(), &Direction);
 	const FVector2D Across(-Direction.Y, Direction.X);
+	const float LineHalfWidth = Path.GetHalfWidthAt(Path.GetStartLineDistance());
 	auto LineCorner = [&](float Along, float Side)
 	{
 		return FVector(StartLine + Direction * Along + Across * Side, LineZ);
 	};
-	Line.AddPolygon({ LineCorner(-LineDepth * 0.5f, -HalfWidth), LineCorner(LineDepth * 0.5f, -HalfWidth),
-		LineCorner(LineDepth * 0.5f, HalfWidth), LineCorner(-LineDepth * 0.5f, HalfWidth) }, FVector::UpVector);
+	Line.AddPolygon({ LineCorner(-LineDepth * 0.5f, -LineHalfWidth), LineCorner(LineDepth * 0.5f, -LineHalfWidth),
+		LineCorner(LineDepth * 0.5f, LineHalfWidth), LineCorner(-LineDepth * 0.5f, LineHalfWidth) }, FVector::UpVector);
 
 	TrackMesh->ClearAllMeshSections();
 	CreateSection(TrackMesh, RoadSection, Road, false, RoadMaterialPath);
@@ -244,6 +282,7 @@ void ARaceTrackBuilder::Build(const FRaceTrackPath& Path, int32 ScenerySeed)
 	Props.Reset();
 	FRandomStream Random(ScenerySeed);
 	BuildFences(Path, Random);
+	BuildNarrowingScenery(Path, Random);
 	BuildFloorScenery(Path, Random);
 
 	UE_LOG(LogRaceTrack, Log, TEXT("race.Track built: %d road / %d wall triangles, %d scenery pieces"),
@@ -287,6 +326,29 @@ void ARaceTrackBuilder::BuildFences(const FRaceTrackPath& Path, FRandomStream& R
 	for (const float Side : { -1.0f, 1.0f })
 	{
 		AddProp(FenceMesh(TEXT("EA03_Wooden_Pin_01d")), StartLine + Across * Side * (Clear + 60.0f), 0.0f, 1.0f, true);
+	}
+}
+
+void ARaceTrackBuilder::BuildNarrowingScenery(const FRaceTrackPath& Path, FRandomStream& Random)
+{
+	// Rocks and bushes in the grass beside a narrowed kerb, so the squeeze looks like it's there for a reason.
+	const float FullHalfWidth = FRaceTrackPath::TrackWidth * 0.5f;
+	for (const FRaceTrackPath::FNarrowingSpan& Span : Path.GetNarrowingSpans())
+	{
+		const float Gap = FullHalfWidth - Span.HalfWidth; // between the narrow kerb and where the full-width kerb would be
+		for (float Along = -Span.HalfLength; Along <= Span.HalfLength + 1.0f; Along += 170.0f)
+		{
+			FVector2D Direction;
+			const FVector2D Point = Path.GetPointAtDistance(Span.CentreDistance + Along, &Direction);
+			const FVector2D Across(-Direction.Y, Direction.X);
+			for (const float Side : { -1.0f, 1.0f })
+			{
+				const bool bRock = Random.FRand() < 0.6f;
+				const FVector2D Location = Point + Across * Side * (Span.HalfWidth + FRaceTrackPath::WallWidth + Gap * 0.5f);
+				AddProp(NatureMesh(bRock ? TEXT("SM_Rock02") : TEXT("SM_Bush_Simple")), Location, Random.FRandRange(0.0f, 360.0f),
+					bRock ? Random.FRandRange(0.45f, 0.65f) : Random.FRandRange(0.8f, 1.05f), true);
+			}
+		}
 	}
 }
 
