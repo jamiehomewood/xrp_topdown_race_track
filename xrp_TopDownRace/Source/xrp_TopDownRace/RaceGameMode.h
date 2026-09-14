@@ -14,6 +14,7 @@ class ARaceCelebration;
 class ARaceDisplay;
 class ARacePlayerController;
 class ARaceMountainRing;
+class ARacePositionBoard;
 class ARaceStartLights;
 class ARaceTrackBuilder;
 class USceneCaptureComponent2D;
@@ -33,6 +34,7 @@ struct FRaceCarStats
 {
 	int32 Lap = 0;               // lap being driven (1-based); 0 before the race starts
 	bool bFinished = false;
+	FString FinishGap;           // gap to the winner when the race ended ("+1.4", "+1 LAP")
 	int32 FinishPosition = 0;
 	uint8 Checkpoints = 0;       // sector gates passed this lap (bits 0 and 1); a lap only counts with both
 	float LapStartTime = 0.0f;
@@ -150,6 +152,9 @@ private:
 	void DriveComputerCars(float DeltaSeconds);
 	void RefreshDisplays();
 
+	/** Draws the header and the running order on the LED position boards. */
+	void UpdatePositionBoard(const TArray<int32>& Order, int32 RaceLaps, bool bRaceRunning);
+
 	/** "PLAYER n WINS!" / "CAR n WINS!" (empty before anyone has won). */
 	FString GetWinnerText() const;
 
@@ -240,12 +245,15 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<ARaceCelebration> Celebration;
 
+	/** LED timing-tower boards beyond the front and back walls. */
+	UPROPERTY(Transient)
+	TObjectPtr<ARacePositionBoard> PositionBoard;
+
 	/** Settings menu boards on the front and back walls (hidden while the menu is closed). */
 	UPROPERTY(Transient)
 	TObjectPtr<ARaceDisplay> MenuDisplay;
 
 	TArray<int32> PanelLines;   // PanelLinesPerSlot floor lines per player slot
-	TArray<int32> WallLines;    // per wall: banner + one row per car
 	float DisplayRefreshTimer = 0.0f;
 
 	enum class EAudioRecordingState : uint8 { Waiting, Recording, Done };

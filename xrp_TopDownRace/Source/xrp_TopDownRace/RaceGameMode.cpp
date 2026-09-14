@@ -21,11 +21,13 @@
 #include "Misc/Paths.h"
 #include "RaceCarPawn.h"
 #include "RaceCelebration.h"
+#include "RaceDotFont.h"
 #include "RaceDisplay.h"
 #include "RaceEngineSynth.h"
 #include "RaceHUD.h"
 #include "RaceInputSettings.h"
 #include "RaceMountainRing.h"
+#include "RacePositionBoard.h"
 #include "RacePlayerController.h"
 #include "RaceStartLights.h"
 #include "RaceTrackBuilder.h"
@@ -166,10 +168,22 @@ namespace
 	// sits above the horizon (eye height 1700 UU) so it reads against the sky, not the trees.
 	constexpr float WallDisplayDistance = 3150.0f;
 	constexpr float WallLightsHeight = 2780.0f;
-	constexpr float WallBannerHeight = 2420.0f;
-	constexpr float WallFirstRowHeight = 2230.0f;
-	constexpr float WallRowSpacing = 140.0f;
-	constexpr int32 WallRows = 4;
+
+	// LED position boards beyond the front and back walls, under the start lights.
+	constexpr float PositionBoardWidth = 2900.0f;
+	constexpr float PositionBoardCentreHeight = 1960.0f;
+	constexpr float GapReferenceSpeed = 1300.0f;   // UU/s used to turn a distance behind the leader into seconds
+
+	/** Gap to the car ahead of the field: "+1.4" seconds, or "+1 LAP" / "+2 LAPS". */
+	FString GapText(float DistanceBehind, float LapLength)
+	{
+		if (LapLength > 0.0f && DistanceBehind >= LapLength)
+		{
+			const int32 Laps = FMath::FloorToInt(DistanceBehind / LapLength);
+			return FString::Printf(TEXT("+%d LAP%s"), Laps, Laps > 1 ? TEXT("S") : TEXT(""));
+		}
+		return FString::Printf(TEXT("+%.1f"), FMath::Max(DistanceBehind, 0.0f) / GapReferenceSpeed);
+	}
 
 	// Settings menu boards: just in front of the wall displays, covering them while open.
 	constexpr float MenuWallInset = 120.0f;
@@ -363,7 +377,7 @@ void ARaceGameMode::UpdateSpeakerTest(float DeltaSeconds)
 	}
 
 	StartLights->SignalSound->Beep(SpeakerTestHz, SpeakerTestBeepSeconds, 0.6f * GetDefault<URaceInputSettings>()->SignalVolume, 1u << SpeakerTestChannel);
-	DiagnosticBanner = FString::Printf(TEXT("SPEAKER TEST: %s  (%d CH)"), URaceSignalSynth::ChannelName(SpeakerTestChannel), AudioChannelCount);
+	DiagnosticBanner = FString::Printf(TEXT("TEST %s  %dCH"), URaceSignalSynth::ChannelName(SpeakerTestChannel), AudioChannelCount);
 	UE_LOG(LogRace, Log, TEXT("race.SpeakerTest channel %d %s"), SpeakerTestChannel, URaceSignalSynth::ChannelName(SpeakerTestChannel));
 	SpeakerTestTimer = SpeakerTestStepSeconds;
 	++SpeakerTestChannel;
@@ -406,19 +420,22 @@ void ARaceGameMode::SpawnRaceProps()
 			}
 		}
 
-		// Banner and leaderboard beyond the front and back walls, on a dark board.
+	}
+
+	// LED position boards (timing tower style) beyond the front and back walls, facing the room.
+	PositionBoard = GetWorld()->SpawnActor<ARacePositionBoard>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	if (PositionBoard)
+	{
 		for (const float Side : { 1.0f, -1.0f })
 		{
 			const FVector Facing(0.0f, -Side, 0.0f);
-			const float Y = Side * WallDisplayDistance;
-			const float BoardTop = WallBannerHeight + 130.0f;
-			const float BoardBottom = WallFirstRowHeight - (WallRows - 1) * WallRowSpacing - 90.0f;
-			Display->AddWallBacking(FVector(0.0f, Y, (BoardTop + BoardBottom) * 0.5f), Facing, 2900.0f, BoardTop - BoardBottom);
-			WallLines.Add(Display->AddWallLine(FVector(0.0f, Y, WallBannerHeight), Facing, 200.0f));
-			for (int32 Row = 0; Row < WallRows; ++Row)
-			{
-				WallLines.Add(Display->AddWallLine(FVector(0.0f, Y, WallFirstRowHeight - Row * WallRowSpacing), Facing, 120.0f));
-			}
+			const FTransform FaceTransform(FRotationMatrix::MakeFromXZ(Facing, FVector::UpVector).ToQuat(),
+				FVector(0.0f, Side * WallDisplayDistance, PositionBoardCentreHeight));
+			PositionBoard->AddFace(FaceTransform, PositionBoardWidth, 0.0f);
+		}
+		for (int32 Slot = 0; Slot < MaxPlayers; ++Slot)
+		{
+			PositionBoard->SetCarColor(Slot, FLinearColor(SlotColor(Slot)));
 		}
 	}
 
@@ -603,7 +620,10 @@ void ARaceGameMode::EnterPhase(ERacePhase NewPhase)
 		}
 		if (Celebration && Cars.IsValidIndex(WinnerSlot))
 		{
-			Celebration->Celebrate(GetWinnerText(), SlotColor(WinnerSlot));
+			FVector2D FinishDirection;
+			const FVector2D FinishLine = TrackPath.GetPointAtDistance(TrackPath.GetStartLineDistance(), &FinishDirection);
+			const FString WinnerName = Cars[WinnerSlot]->IsPlayerControlled() ? FString::Printf(TEXT("PLAYER %d"), WinnerSlot + 1) : FString::Printf(TEXT("CAR %d"), WinnerSlot + 1);
+			Celebration->Celebrate(WinnerName, SlotColor(WinnerSlot), FinishLine, FinishDirection, TrackPath.GetHalfWidthAt(TrackPath.GetStartLineDistance()));
 		}
 		break;
 	}
@@ -685,6 +705,7 @@ void ARaceGameMode::UpdateLapsAndPositions()
 		for (int32 Index = 0; Index < Order.Num(); ++Index)
 		{
 			FRaceCarStats& S = Stats[Order[Index]];
+			S.FinishGap = Index == 0 ? FString() : GapText(RaceLaps * LapLength - S.RaceDistance, LapLength);
 			S.bFinished = true;
 			S.FinishPosition = Index + 1;
 			S.RaceDistance = FinishedRaceDistance(S.FinishPosition);
@@ -1022,76 +1043,108 @@ void ARaceGameMode::RefreshDisplays()
 		}
 	}
 
-	// Wall banner and leaderboard.
-	FString Banner;
-	FColor BannerColor = FColor::White;
+	UpdatePositionBoard(Order, RaceLaps, bRaceRunning);
+}
+
+void ARaceGameMode::UpdatePositionBoard(const TArray<int32>& Order, int32 RaceLaps, bool bRaceRunning)
+{
+	if (!PositionBoard)
+	{
+		return;
+	}
+	using EColor = ERaceBoardColor;
+	constexpr int32 Columns = ARacePositionBoard::Columns;
+	PositionBoard->Clear();
+
+	// Header: the state of the race in big letters.
+	FString Header;
+	EColor HeaderColor = EColor::White;
 	switch (Phase)
 	{
 	case ERacePhase::GetReady:
-		// Also flag a wrong audio device to whoever is running the room.
-		Banner = AudioChannelCount > 0 && AudioChannelCount < MinRoomAudioChannels
-			? FString::Printf(TEXT("GET READY   (AUDIO: %d CH)"), AudioChannelCount)
-			: FString(TEXT("GET READY"));
+		// Also flags a wrong audio device to whoever runs the room.
+		Header = AudioChannelCount > 0 && AudioChannelCount < MinRoomAudioChannels ? FString::Printf(TEXT("AUDIO %d CH"), AudioChannelCount) : FString(TEXT("GET READY"));
+		HeaderColor = EColor::Amber;
 		break;
-	case ERacePhase::Lights: Banner = TEXT(""); break;
+	case ERacePhase::Lights:
+		Header = TEXT("STAND BY");
+		HeaderColor = EColor::Red;
+		break;
 	case ERacePhase::Racing:
 		if (PhaseTime < GoBannerSeconds)
 		{
-			Banner = TEXT("GO!");
-			BannerColor = FColor(90, 255, 90);
+			Header = TEXT("GO!");
+			HeaderColor = EColor::Green;
 		}
 		else if (Order.Num() > 0)
 		{
-			Banner = FString::Printf(TEXT("LAP %d / %d"), FMath::Clamp(Stats[Order[0]].Lap, 1, RaceLaps), RaceLaps);
+			const int32 Lap = FMath::Clamp(Stats[Order[0]].Lap, 1, RaceLaps);
+			const bool bFinalLap = Lap == RaceLaps && RaceLaps > 1;
+			Header = bFinalLap ? FString(TEXT("FINAL LAP")) : FString::Printf(TEXT("LAP %d/%d"), Lap, RaceLaps);
+			HeaderColor = bFinalLap ? EColor::Amber : EColor::White;
 		}
 		break;
 	case ERacePhase::Results:
-		if (WinnerSlot != INDEX_NONE)
-		{
-			Banner = GetWinnerText();
-			BannerColor = SlotColor(WinnerSlot);
-		}
+		Header = GetWinnerText();
+		HeaderColor = EColor::Gold;
 		break;
 	}
-
 	if (!DiagnosticBanner.IsEmpty())
 	{
-		Banner = DiagnosticBanner;
-		BannerColor = FColor::White;
+		Header = DiagnosticBanner;
+		HeaderColor = EColor::White;
 	}
+	const bool bBigHeader = RaceDotFont::TextWidth(Header, 2) <= Columns - 6;
+	PositionBoard->DrawTextCentred(Columns / 2, bBigHeader ? 2 : 6, Header, HeaderColor, bBigHeader ? 2 : 1);
+	PositionBoard->FillRect(2, 18, Columns - 4, 1, EColor::Dim);
 
-	const int32 LinesPerWall = 1 + WallRows;
-	for (int32 Wall = 0; (Wall + 1) * LinesPerWall <= WallLines.Num(); ++Wall)
+	// Fastest lap of the race so far, shown in purple as on real timing screens.
+	int32 FastestSlot = INDEX_NONE;
+	for (int32 Slot = 0; Slot < Stats.Num(); ++Slot)
 	{
-		const int32 Base = Wall * LinesPerWall;
-		Display->SetLine(WallLines[Base], Banner, BannerColor);
-		for (int32 Row = 0; Row < WallRows; ++Row)
+		if (Stats[Slot].BestLapTime > 0.0f && (FastestSlot == INDEX_NONE || Stats[Slot].BestLapTime < Stats[FastestSlot].BestLapTime))
 		{
-			FString RowText;
-			FColor RowColor = FColor::White;
-			if (Order.IsValidIndex(Row))
-			{
-				const int32 Slot = Order[Row];
-				const FRaceCarStats& S = Stats[Slot];
-				const bool bPlayer = Cars[Slot]->IsPlayerControlled();
-				const FString Name = bPlayer ? FString::Printf(TEXT("PLAYER %d"), Slot + 1) : FString::Printf(TEXT("CAR %d (CPU)"), Slot + 1);
-				RowColor = SlotColor(Slot);
-				if (!bRaceRunning)
-				{
-					RowText = FString::Printf(TEXT("%s  ON THE GRID"), *Name);
-				}
-				else if (S.bFinished)
-				{
-					RowText = FString::Printf(TEXT("%d.  %s   FINISHED   BEST %s"), S.Position, *Name, *FormatTime(S.BestLapTime));
-				}
-				else
-				{
-					RowText = FString::Printf(TEXT("%d.  %s   LAP %d/%d   BEST %s"), S.Position, *Name, S.Lap, RaceLaps, *FormatTime(S.BestLapTime));
-				}
-			}
-			Display->SetLine(WallLines[Base + 1 + Row], RowText, RowColor);
+			FastestSlot = Slot;
 		}
 	}
+
+	// One row per car: position, colour, name, gap to the leader, best lap.
+	const float LeaderDistance = Order.Num() > 0 ? Stats[Order[0]].RaceDistance : 0.0f;
+	for (int32 Row = 0; Row < Order.Num() && Row < MaxPlayers; ++Row)
+	{
+		const int32 Slot = Order[Row];
+		const FRaceCarStats& S = Stats[Slot];
+		const bool bPlayer = Cars[Slot]->IsPlayerControlled();
+		const EColor CarColor = EColor(uint8(EColor::Car1) + Slot % 4);
+		const int32 Y = 21 + Row * 9;
+
+		PositionBoard->DrawTextRight(15, Y, FString::FromInt(bRaceRunning ? S.Position : Row + 1), EColor::White);
+		PositionBoard->FillRect(18, Y, 4, 7, CarColor);
+		PositionBoard->DrawText(26, Y, bPlayer ? FString::Printf(TEXT("PLAYER %d"), Slot + 1) : FString::Printf(TEXT("CAR %d"), Slot + 1), bPlayer ? CarColor : EColor::White);
+
+		FString Gap;
+		EColor GapColor = EColor::Amber;
+		if (!bRaceRunning)
+		{
+			Gap = TEXT("ON GRID");
+		}
+		else if (Row == 0)
+		{
+			Gap = Phase == ERacePhase::Results ? TEXT("WINNER") : TEXT("LEADER");
+			GapColor = Phase == ERacePhase::Results ? EColor::Gold : EColor::Amber;
+		}
+		else if (Phase == ERacePhase::Results)
+		{
+			Gap = S.FinishGap;
+		}
+		else
+		{
+			Gap = GapText(LeaderDistance - S.RaceDistance, TrackPath.GetLapLength());
+		}
+		PositionBoard->DrawTextRight(121, Y, Gap, GapColor);
+		PositionBoard->DrawTextRight(167, Y, FormatTime(S.BestLapTime), Slot == FastestSlot ? EColor::Purple : EColor::White);
+	}
+	PositionBoard->Commit();
 }
 
 void ARaceGameMode::UpdateCaptures(float DeltaSeconds)

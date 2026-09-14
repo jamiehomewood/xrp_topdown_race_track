@@ -48,12 +48,18 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   Lights show on a gantry over the start line (floor) and on boards on the front and back walls.
 - `RaceLaps` laps (default 5). Laps only count after passing both sector checkpoints. The race ends the moment
   the first car completes the last lap: everyone else is placed where they are, all cars roll to a stop, and the
-  winner is celebrated for 11 s — "PLAYER n WINS!" turning slowly above the middle of the track, confetti pouring
-  from the roof line of every wall down onto the floor, a fanfare from every speaker — then everyone is back on the grid.
+  winner is celebrated for 11 s, then everyone is back on the grid:
+  - a round stage pops up above the middle of the track and turns slowly: a podium with a low-poly gold trophy
+    (built in code: a faceted revolved cup with handles) and "PLAYER n WINS!" in chunky block letters on both sides;
+  - a chequered flag is waved from a stand beside the finish line, out over the road;
+  - confetti pours from the roof line of every wall down onto the floor, and a fanfare plays from every speaker.
 - **Slipstream**: right behind another car you gain up to +22 % top speed and +60 % acceleration, so you can
   pull out and pass on the straights (`bDraftingEnabled`).
-- Displays: a floor panel in each room corner (player/CPU, position, lap, lap time, best, DRAFT) and a banner +
-  leaderboard on the front and back walls.
+- Displays: a floor panel in each room corner (player/CPU, position, lap, lap time, best, DRAFT), and an LED
+  **position board** like a track's timing tower on the front and back walls (black housing, metal frame, legs):
+  a dot-matrix header (GET READY, STAND BY, GO!, LAP 3/5, FINAL LAP, the winner) and one row per car with position,
+  colour, name, gap to the leader (+1.4 / +1 LAP) and best lap, the race's fastest lap in purple. The 5 x 7 LED
+  font is built into the game (RaceDotFont), so there's no font asset or licence involved.
 - **Computer drivers** (Race Settings › Computer Drivers, or `DefaultGame.ini`): each race every CPU car gets a
   random pace between `CpuPaceMin` and `CpuPaceMax` (0.78–0.9 of full speed), makes a mistake every
   `CpuMistakeGapMin`–`CpuMistakeGapMax` seconds (3–7), and `CpuSpinChance` (35 %) of those are a full spin in a
