@@ -785,6 +785,10 @@ void ARaceGameMode::ComputeComputerDriverInput(int32 SlotIndex, float DeltaTime,
 		OutThrottle = 0.6f; // rev on the grid
 		return;
 	}
+	if (Phase == ERacePhase::Results)
+	{
+		return; // race over: rolling to a stop isn't being stuck
+	}
 
 	const FVector Location3D = Car->GetActorLocation();
 	const FVector2D Location(Location3D.X, Location3D.Y);
@@ -1544,6 +1548,7 @@ void ARaceGameMode::RunTrackSurvey(int32 Count)
 	double TotalLap = 0.0;
 	int32 TotalCorners = 0;
 	TMap<int32, int32> NarrowingCounts;
+	TMap<int32, int32> CornerCounts;
 	float NarrowestWidth = FRaceTrackPath::TrackWidth;
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
@@ -1571,6 +1576,7 @@ void ARaceGameMode::RunTrackSurvey(int32 Count)
 		MaxLap = FMath::Max(MaxLap, Path.GetLapLength());
 		TotalLap += Path.GetLapLength();
 		TotalCorners += Layout.ControlPoints.Num();
+		++CornerCounts.FindOrAdd(Layout.ControlPoints.Num());
 		Named.Add(Layout.Name);
 		FString Shape;
 		Layout.Name.Split(TEXT(" "), &Shape, nullptr);
@@ -1581,6 +1587,13 @@ void ARaceGameMode::RunTrackSurvey(int32 Count)
 	UE_LOG(LogRace, Log, TEXT("race.TrackSurvey %d layouts in %.2f s: %d failed, %d cell shapes (%d with direction), lap %.0f-%.0f UU (mean %.0f), %.1f corners on average; original track check: %s"),
 		Count, FPlatformTime::Seconds() - StartTime, Failed, Shapes.Num(), Named.Num(), MinLap, MaxLap, Good > 0 ? TotalLap / Good : 0.0,
 		Good > 0 ? float(TotalCorners) / Good : 0.0f, ClassicProblem.IsEmpty() ? TEXT("OK") : *ClassicProblem);
+	CornerCounts.KeySort([](int32 A, int32 B) { return A < B; });
+	TArray<FString> CornerText;
+	for (const TPair<int32, int32>& Corners : CornerCounts)
+	{
+		CornerText.Add(FString::Printf(TEXT("%d corners x%d (%.0f%%)"), Corners.Key, Corners.Value, 100.0f * Corners.Value / FMath::Max(Good, 1)));
+	}
+	UE_LOG(LogRace, Log, TEXT("race.TrackSurvey %s"), *FString::Join(CornerText, TEXT(", ")));
 	UE_LOG(LogRace, Log, TEXT("race.TrackSurvey narrow stretches per track: none x%d, one x%d, two x%d; narrowest road %.0f UU"),
 		NarrowingCounts.FindRef(0), NarrowingCounts.FindRef(1), NarrowingCounts.FindRef(2), NarrowestWidth);
 	Shapes.ValueSort([](int32 A, int32 B) { return A > B; });

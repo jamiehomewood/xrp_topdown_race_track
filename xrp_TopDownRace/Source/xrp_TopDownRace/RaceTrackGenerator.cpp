@@ -19,7 +19,15 @@ namespace
 	constexpr double GridRunUp = 1220.0;         // straight road behind the start line for the 2 x 2 grid
 	constexpr double MinStartStraight = 1500.0;
 	constexpr float CellChance = 0.72f;
-	constexpr float PlainRectangleChance = 0.25f; // keep only some 4-corner (oval) layouts, they're the least interesting
+
+	/**
+	 * Share of layouts kept by corner count. Plain ovals (4 corners) and L-shapes (6) are the outlines random cells
+	 * make most often but the least interesting to race, so most are thrown away in favour of twistier ones.
+	 */
+	float KeepChance(int32 NumCorners)
+	{
+		return NumCorners <= 4 ? 0.1f : (NumCorners <= 6 ? 0.4f : 1.0f);
+	}
 	constexpr int32 MaxAttempts = 500;
 
 	// Narrow stretches on straights: about two car widths, so cars have to queue or squeeze through.
@@ -181,7 +189,7 @@ bool RaceTrackGenerator::Generate(FRandomStream& Random, FRaceTrackLayout& OutLa
 			Algo::Reverse(Corners);
 		}
 		const int32 NumCorners = Corners.Num();
-		if (NumCorners < 4 || (NumCorners == 4 && Random.FRand() > PlainRectangleChance))
+		if (NumCorners < 4 || Random.FRand() > KeepChance(NumCorners))
 		{
 			continue;
 		}

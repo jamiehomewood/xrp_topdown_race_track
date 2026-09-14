@@ -68,7 +68,8 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   scenery scattered over the rest of the room floor. Turn it off to always race the original track.
 - A layout is the outline of a random group of cells on a 2-column, 2-4 row grid with random cut positions (the
   original track is one of them), so the road never crosses itself and corners are rounded right angles. The
-  direction and the start straight are random too. Random tracks use a footprint 30 cm bigger on every side than the
+  direction and the start straight are random too. Plain ovals (kept 10% of the time) and L-shapes (40%) are made
+  rarer in favour of twistier 8–12 corner layouts. Random tracks use a footprint 30 cm bigger on every side than the
   original (outer kerb ~36 cm, fence ~27 cm from the room walls). Each layout is checked before use: inside that footprint,
   straights long enough for the corners, grass between neighbouring stretches of road, a lap of at least 9 m,
   and a straight with room for the grid behind the start line.
