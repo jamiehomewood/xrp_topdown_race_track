@@ -53,12 +53,19 @@ Each car has a procedural engine voice (`RaceEngineSynth`, no sound assets): pit
 throttle, and wall/car hits add a scrape. Sounds are 3D at the car, and the audio listener sits at the centre of
 the room floor, so each car is panned to the speakers on its side of the room as it drives around.
 
-- Windows' sound device on the room PC must be set to the room's speaker layout (e.g. 5.1); Unreal outputs to
-  whatever channel count Windows reports.
-- Race Settings > `AudioFrontYaw`: which world direction the front speakers face (0 = top of the desktop view).
+The room has six speakers: two on the front wall, one on each side wall, two on the back wall (no centre, no sub).
+The front wall is the level's +Y side: the long straight runs along it, and the start-line straight runs along
+the back wall.
+
+- Windows' sound device on the room PC must be set to **7.1**, with the six speakers on the front L/R, side L/R and
+  back (rear) L/R outputs; centre and subwoofer outputs are unused. Unreal outputs whatever layout Windows reports.
+- Race Settings > `AudioFrontYaw` = 90: the listener faces the front wall (+Y).
+- `Config/DefaultEngine.ini` > `[AudioChannelAzimuthMap]`: speaker angles clockwise from the front wall, an even
+  ring: FrontRight 30, SideRight 90, BackRight 150, BackLeft 210, SideLeft 270, FrontLeft 330. Centre-channel
+  panning is off. Adjust the angles if the speakers are mounted far from even spacing.
 - Race Settings > `EngineVolume`: overall car sound level.
-- `Config/DefaultEngine.ini` > `[AudioChannelAzimuthMap]`: set the real angle of each speaker (degrees clockwise
-  from front) so panning matches the room rather than a home-theatre layout. Centre-speaker panning is on.
+- Quick check in the room: a car on the long straight should sound from the front wall, a car on the start-line
+  straight from the back wall.
 - Console `race.RecordAudio 30` records the mixed output to `Saved/BouncedWavFiles/RaceAudio.wav` and logs car
   positions, for checking the panning without being in the room; add `race.AudioSweep 1` to hold car 1 on a circle
   round the listener in 45-degree steps (one measurement per speaker direction).
