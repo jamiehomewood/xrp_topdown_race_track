@@ -42,31 +42,31 @@ namespace
 		FLinearColor(0.3f, 3.0f, 0.4f), FLinearColor(3.0f, 0.4f, 2.2f), FLinearColor(3.0f, 3.0f, 3.0f),
 	};
 
-	// Stage: floats just above the kerb walls in the middle of the room and turns slowly.
-	constexpr float StageZ = 64.0f;
-	constexpr float StageRadius = 1100.0f;
-	constexpr float StageThickness = 26.0f;
-	constexpr float StageTurnRate = 12.0f;      // degrees per second
-	constexpr float PopInSeconds = 0.7f;
-	constexpr float LetterPixel = 19.0f;
-	constexpr float LetterDepth = 30.0f;
-	constexpr float LetterRowOffset = 640.0f;   // each line of block letters, from the stage centre
-	constexpr float DigitPixel = 14.0f;
-	constexpr float StepWidth = 300.0f;
-	constexpr float StepDepth = 260.0f;
-	constexpr float PlinthSize = 190.0f;
-	constexpr float PlinthHeight = 60.0f;
-	constexpr float TrophyScale = 1.7f;
+	// Winner displays: just beyond the side walls (x = +-2500; the position boards are on the front and back walls),
+	// facing the room. Display space: X towards the room, Y to the viewers' left, Z up; origin on the ground.
+	constexpr float DisplayDistance = 2750.0f;
+	constexpr float PopInSeconds = 0.8f;
+	constexpr float StepWidth = 620.0f;
+	constexpr float StepDepth = 500.0f;
+	constexpr float DigitPixel = 22.0f;
+	constexpr float PlinthSize = 320.0f;
+	constexpr float PlinthHeight = 140.0f;
+	constexpr float TrophyScale = 4.2f;        // about 14 m tall: the height of a tree beyond the wall
+	constexpr float TrophySpinRate = 20.0f;    // degrees per second, so the facets catch the light
+	constexpr float LetterPixel = 45.0f;
+	constexpr float LetterDepth = 40.0f;
+	constexpr float LetterBottom = 2200.0f;    // above the horizon (eye height 1700), against the sky
+	constexpr float LetterSetBack = -250.0f;   // behind the trophy
 	const FLinearColor GoldColor(1.0f, 0.62f, 0.1f);
 
 	struct FPodiumStep
 	{
-		float X;
+		float Y;       // 2nd on the viewers' left, 3rd on their right
 		float Height;
 		float Grey;
 		TCHAR Digit;
 	};
-	const FPodiumStep PodiumSteps[] = { { 0.0f, 150.0f, 0.85f, '1' }, { -StepWidth, 100.0f, 0.6f, '2' }, { StepWidth, 64.0f, 0.45f, '3' } };
+	const FPodiumStep PodiumSteps[] = { { 0.0f, 420.0f, 0.85f, '1' }, { StepWidth, 280.0f, 0.6f, '2' }, { -StepWidth, 180.0f, 0.45f, '3' } };
 
 	// Chequered flag, waved from a stand beside the finish line out over the road.
 	constexpr float KerbWidth = 40.0f;
@@ -133,6 +133,68 @@ namespace
 		Mesh->CreateMeshSection(Section, Buffers.Vertices, Buffers.Triangles, Buffers.Normals, Buffers.UVs, TArray<FColor>(), TArray<FProcMeshTangent>(), false);
 	}
 
+	/** The trophy: a cup profile revolved in 12 flat facets, with two square-tube handles. Base at the origin. */
+	void BuildTrophyGeometry(FMeshBuffers& Gold)
+	{
+		// (radius, height): up the outside, across the rim, down the inside.
+		const FVector2D Profile[] = {
+			{ 80, 0 }, { 80, 18 }, { 42, 28 }, { 26, 48 }, { 18, 90 }, { 18, 135 }, { 38, 148 }, { 22, 162 }, { 30, 180 },
+			{ 72, 212 }, { 102, 252 }, { 116, 300 }, { 122, 328 }, { 106, 328 }, { 98, 300 }, { 72, 252 }, { 40, 230 }, { 0, 222 },
+		};
+		constexpr int32 Facets = 12;
+		auto OnCup = [](const FVector2D& RadiusHeight, float Angle)
+		{
+			return FVector(RadiusHeight.X * FMath::Cos(Angle), RadiusHeight.X * FMath::Sin(Angle), RadiusHeight.Y) * TrophyScale;
+		};
+		for (int32 Index = 0; Index + 1 < UE_ARRAY_COUNT(Profile); ++Index)
+		{
+			const FVector2D& From = Profile[Index];
+			const FVector2D& To = Profile[Index + 1];
+			for (int32 Facet = 0; Facet < Facets; ++Facet)
+			{
+				const float Angle0 = UE_TWO_PI * Facet / Facets;
+				const float Angle1 = UE_TWO_PI * (Facet + 1) / Facets;
+				const float Middle = (Angle0 + Angle1) * 0.5f;
+				const FVector Radial(FMath::Cos(Middle), FMath::Sin(Middle), 0.0f);
+				// Outward for the outside, up for the rim, towards the axis for the inside.
+				const FVector Normal = (Radial * (To.Y - From.Y) - FVector::UpVector * (To.X - From.X)).GetSafeNormal();
+				Gold.AddPolygon({ OnCup(From, Angle0), OnCup(From, Angle1), OnCup(To, Angle1), OnCup(To, Angle0) }, Normal);
+			}
+		}
+
+		constexpr int32 ArcSteps = 9;
+		constexpr float ArcRadius = 60.0f;
+		constexpr float Tube = 9.0f;
+		for (const float Side : { 1.0f, -1.0f })
+		{
+			const FVector ArcCentre(Side * 100.0f, 0.0f, 260.0f);
+			auto Ring = [&](int32 Step, TArray<FVector, TInlineAllocator<4>>& OutCorners, FVector& OutAxis)
+			{
+				const float Angle = FMath::DegreesToRadians(FMath::Lerp(-120.0f, 95.0f, float(Step) / ArcSteps));
+				const FVector Radial(Side * FMath::Cos(Angle), 0.0f, FMath::Sin(Angle));
+				const FVector Across(0.0f, 1.0f, 0.0f);
+				OutAxis = ArcCentre + Radial * ArcRadius;
+				OutCorners = { OutAxis + (Radial + Across) * Tube, OutAxis + (-Radial + Across) * Tube, OutAxis + (-Radial - Across) * Tube, OutAxis + (Radial - Across) * Tube };
+			};
+			for (int32 Step = 0; Step < ArcSteps; ++Step)
+			{
+				TArray<FVector, TInlineAllocator<4>> RingA;
+				TArray<FVector, TInlineAllocator<4>> RingB;
+				FVector AxisA;
+				FVector AxisB;
+				Ring(Step, RingA, AxisA);
+				Ring(Step + 1, RingB, AxisB);
+				for (int32 Corner = 0; Corner < 4; ++Corner)
+				{
+					const int32 Next = (Corner + 1) % 4;
+					const FVector Centre = (RingA[Corner] + RingA[Next] + RingB[Next] + RingB[Corner]) * 0.25f;
+					const FVector Normal = (Centre - (AxisA + AxisB) * 0.5f).GetSafeNormal();
+					Gold.AddPolygon({ RingA[Corner] * TrophyScale, RingA[Next] * TrophyScale, RingB[Next] * TrophyScale, RingB[Corner] * TrophyScale }, Normal);
+				}
+			}
+		}
+	}
+
 	float EaseOutBack(float T)
 	{
 		const float Overshoot = 1.70158f;
@@ -145,9 +207,6 @@ ARaceCelebration::ARaceCelebration()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
-
-	Turntable = CreateDefaultSubobject<USceneComponent>(TEXT("Turntable"));
-	Turntable->SetupAttachment(RootComponent);
 
 	FlagRoot = CreateDefaultSubobject<USceneComponent>(TEXT("FlagRoot"));
 	FlagRoot->SetupAttachment(RootComponent);
@@ -206,7 +265,6 @@ UInstancedStaticMeshComponent* ARaceCelebration::AddVoxels(USceneComponent* Pare
 void ARaceCelebration::BeginPlay()
 {
 	Super::BeginPlay();
-	Turntable->SetRelativeLocation(FVector(0.0f, 0.0f, StageZ));
 
 	// Confetti: one instanced group per colour.
 	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, CubePath);
@@ -237,8 +295,12 @@ void ARaceCelebration::BeginPlay()
 		}
 	}
 
-	BuildStage();
-	BuildTrophy();
+	GoldMaterial = LitMaterial(GoldColor, 0.3f, 0.9f);
+	NameMaterial = LitMaterial(FLinearColor::White, 0.45f, 0.7f);
+	for (const float Side : { 1.0f, -1.0f })
+	{
+		BuildDisplay(Side);
+	}
 
 	// Flag: a stand, a pole and the chequered cloth (white and black squares as two sections, both sides drawn).
 	UStaticMesh* Cylinder = LoadObject<UStaticMesh>(nullptr, CylinderPath);
@@ -254,164 +316,93 @@ void ARaceCelebration::BeginPlay()
 	FlagCloth->SetMaterial(1, LitMaterial(FLinearColor(0.015f, 0.015f, 0.015f), 0.8f));
 	Parts.Add(FlagCloth);
 
-	Turntable->SetVisibility(false, true);
+	for (USceneComponent* Display : Displays)
+	{
+		Display->SetVisibility(false, true);
+	}
 	FlagRoot->SetVisibility(false, true);
 }
 
-void ARaceCelebration::BuildStage()
+void ARaceCelebration::BuildDisplay(float Side)
 {
-	UStaticMesh* Cylinder = LoadObject<UStaticMesh>(nullptr, CylinderPath);
 	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, CubePath);
-	UMaterialInterface* Gold = LitMaterial(GoldColor, 0.3f, 0.9f);
 
-	// Dark round stage with a gold rim.
-	AddMesh(Turntable, Cylinder, FTransform(FRotator::ZeroRotator, FVector(0.0f, 0.0f, StageThickness * 0.35f),
-		FVector((StageRadius + 35.0f) / 50.0f, (StageRadius + 35.0f) / 50.0f, StageThickness * 0.7f / 100.0f)), Gold, true);
-	AddMesh(Turntable, Cylinder, FTransform(FRotator::ZeroRotator, FVector(0.0f, 0.0f, StageThickness * 0.5f),
-		FVector(StageRadius / 50.0f, StageRadius / 50.0f, StageThickness / 100.0f)), LitMaterial(FLinearColor(0.02f, 0.025f, 0.035f), 0.7f), true);
+	// Root on the ground beyond the side wall, its X axis facing into the room.
+	USceneComponent* Display = NewObject<USceneComponent>(this);
+	Display->SetupAttachment(RootComponent);
+	Display->SetRelativeLocationAndRotation(FVector(Side * DisplayDistance, 0.0f, 0.0f), FRotator(0.0f, Side > 0.0f ? 180.0f : 0.0f, 0.0f));
+	Display->RegisterComponent();
+	Displays.Add(Display);
 
-	// Podium: 2nd | 1st | 3rd, with gold place numbers on top.
-	UInstancedStaticMeshComponent* Digits = AddVoxels(Turntable, Gold);
+	// Podium: 2nd | 1st | 3rd as seen from the room, gold place numbers on the front of the lower steps.
+	UInstancedStaticMeshComponent* Digits = AddVoxels(Display, GoldMaterial);
 	for (const FPodiumStep& Step : PodiumSteps)
 	{
-		AddMesh(Turntable, Cube, FTransform(FRotator::ZeroRotator, FVector(Step.X, 0.0f, StageThickness + Step.Height * 0.5f),
-			FVector(StepWidth, StepDepth, Step.Height) / 100.0f), LitMaterial(FLinearColor(Step.Grey, Step.Grey, Step.Grey + 0.03f), 0.6f), true);
-		if (Step.Digit == '1')
-		{
-			continue; // the trophy stands on the top step
-		}
+		AddMesh(Display, Cube, FTransform(FRotator::ZeroRotator, FVector(0.0f, Step.Y, Step.Height * 0.5f), FVector(StepDepth, StepWidth, Step.Height) / 100.0f),
+			LitMaterial(FLinearColor(Step.Grey, Step.Grey, Step.Grey + 0.03f), 0.6f), true);
 		for (int32 GlyphY = 0; GlyphY < RaceDotFont::GlyphHeight; ++GlyphY)
 		{
 			for (int32 GlyphX = 0; GlyphX < RaceDotFont::GlyphWidth; ++GlyphX)
 			{
 				if (RaceDotFont::IsLit(Step.Digit, GlyphX, GlyphY))
 				{
-					const FVector Location(Step.X - (GlyphX - 2) * DigitPixel, (3 - GlyphY) * DigitPixel, StageThickness + Step.Height + 4.0f);
-					Digits->AddInstance(FTransform(FRotator::ZeroRotator, Location, FVector(DigitPixel * 0.92f, DigitPixel * 0.92f, 8.0f) / 100.0f));
+					// Reading towards the viewers' right (-Y).
+					const FVector Location(StepDepth * 0.5f + 4.0f, Step.Y + (2 - GlyphX) * DigitPixel, Step.Height * 0.5f + (3 - GlyphY) * DigitPixel);
+					Digits->AddInstance(FTransform(FRotator::ZeroRotator, Location, FVector(8.0f, DigitPixel * 0.92f, DigitPixel * 0.92f) / 100.0f));
 				}
 			}
 		}
 	}
 
-	// Black plinth for the trophy on the top step.
-	AddMesh(Turntable, Cube, FTransform(FRotator::ZeroRotator, FVector(0.0f, 0.0f, StageThickness + PodiumSteps[0].Height + PlinthHeight * 0.5f),
+	// Black plinth on the top step, and the gold trophy turning on it.
+	AddMesh(Display, Cube, FTransform(FRotator::ZeroRotator, FVector(0.0f, 0.0f, PodiumSteps[0].Height + PlinthHeight * 0.5f),
 		FVector(PlinthSize, PlinthSize, PlinthHeight) / 100.0f), LitMaterial(FLinearColor(0.02f, 0.02f, 0.02f), 0.4f, 0.7f), true);
 
-	NameMaterial = LitMaterial(FLinearColor::White, 0.45f, 0.7f);
-	NameLetters = AddVoxels(Turntable, NameMaterial);
-	GoldLetters = AddVoxels(Turntable, Gold);
-}
-
-void ARaceCelebration::BuildTrophy()
-{
-	Trophy = NewObject<UProceduralMeshComponent>(this);
-	Trophy->SetupAttachment(Turntable);
-	Trophy->SetRelativeLocation(FVector(0.0f, 0.0f, StageThickness + PodiumSteps[0].Height + PlinthHeight));
+	UProceduralMeshComponent* Trophy = NewObject<UProceduralMeshComponent>(this);
+	Trophy->SetupAttachment(Display);
+	Trophy->SetRelativeLocation(FVector(0.0f, 0.0f, PodiumSteps[0].Height + PlinthHeight));
 	Trophy->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Trophy->RegisterComponent();
-	Parts.Add(Trophy);
-
 	FMeshBuffers Gold;
-
-	// Cup: a profile (radius, height) revolved in 12 flat facets. Order: up the outside, across the rim, down inside.
-	const FVector2D Profile[] = {
-		{ 80, 0 }, { 80, 18 }, { 42, 28 }, { 26, 48 }, { 18, 90 }, { 18, 135 }, { 38, 148 }, { 22, 162 }, { 30, 180 },
-		{ 72, 212 }, { 102, 252 }, { 116, 300 }, { 122, 328 }, { 106, 328 }, { 98, 300 }, { 72, 252 }, { 40, 230 }, { 0, 222 },
-	};
-	constexpr int32 Facets = 12;
-	auto OnCup = [](const FVector2D& RadiusHeight, float Angle)
-	{
-		return FVector(RadiusHeight.X * FMath::Cos(Angle), RadiusHeight.X * FMath::Sin(Angle), RadiusHeight.Y) * TrophyScale;
-	};
-	for (int32 Index = 0; Index + 1 < UE_ARRAY_COUNT(Profile); ++Index)
-	{
-		const FVector2D& From = Profile[Index];
-		const FVector2D& To = Profile[Index + 1];
-		for (int32 Facet = 0; Facet < Facets; ++Facet)
-		{
-			const float Angle0 = UE_TWO_PI * Facet / Facets;
-			const float Angle1 = UE_TWO_PI * (Facet + 1) / Facets;
-			const float Middle = (Angle0 + Angle1) * 0.5f;
-			const FVector Radial(FMath::Cos(Middle), FMath::Sin(Middle), 0.0f);
-			// Outward for the outside, up for the rim, towards the axis for the inside.
-			const FVector Normal = (Radial * (To.Y - From.Y) - FVector::UpVector * (To.X - From.X)).GetSafeNormal();
-			Gold.AddPolygon({ OnCup(From, Angle0), OnCup(From, Angle1), OnCup(To, Angle1), OnCup(To, Angle0) }, Normal);
-		}
-	}
-
-	// Handles: a square tube bent round an arc on each side, both ends buried in the cup.
-	constexpr int32 ArcSteps = 9;
-	constexpr float ArcRadius = 60.0f;
-	constexpr float Tube = 9.0f;
-	for (const float Side : { 1.0f, -1.0f })
-	{
-		const FVector ArcCentre(Side * 100.0f, 0.0f, 260.0f);
-		auto Ring = [&](int32 Step, TArray<FVector, TInlineAllocator<4>>& OutCorners, FVector& OutAxis)
-		{
-			const float Angle = FMath::DegreesToRadians(FMath::Lerp(-120.0f, 95.0f, float(Step) / ArcSteps));
-			const FVector Radial(Side * FMath::Cos(Angle), 0.0f, FMath::Sin(Angle));
-			const FVector Across(0.0f, 1.0f, 0.0f);
-			OutAxis = ArcCentre + Radial * ArcRadius;
-			OutCorners = { OutAxis + (Radial + Across) * Tube, OutAxis + (-Radial + Across) * Tube, OutAxis + (-Radial - Across) * Tube, OutAxis + (Radial - Across) * Tube };
-		};
-		for (int32 Step = 0; Step < ArcSteps; ++Step)
-		{
-			TArray<FVector, TInlineAllocator<4>> RingA;
-			TArray<FVector, TInlineAllocator<4>> RingB;
-			FVector AxisA;
-			FVector AxisB;
-			Ring(Step, RingA, AxisA);
-			Ring(Step + 1, RingB, AxisB);
-			for (int32 Corner = 0; Corner < 4; ++Corner)
-			{
-				const int32 Next = (Corner + 1) % 4;
-				const FVector Centre = (RingA[Corner] + RingA[Next] + RingB[Next] + RingB[Corner]) * 0.25f;
-				const FVector Normal = (Centre - (AxisA + AxisB) * 0.5f).GetSafeNormal();
-				Gold.AddPolygon({ RingA[Corner] * TrophyScale, RingA[Next] * TrophyScale, RingB[Next] * TrophyScale, RingB[Corner] * TrophyScale }, Normal);
-			}
-		}
-	}
-
+	BuildTrophyGeometry(Gold);
 	CreateSection(Trophy, 0, Gold);
-	Trophy->SetMaterial(0, LitMaterial(GoldColor, 0.3f, 0.9f));
+	Trophy->SetMaterial(0, GoldMaterial);
+	Parts.Add(Trophy);
+	Trophies.Add(Trophy);
+
+	NameLetters.Add(AddVoxels(Display, NameMaterial));
+	GoldLetters.Add(AddVoxels(Display, GoldMaterial));
 }
 
 void ARaceCelebration::BuildLetters(const FString& WinnerName)
 {
-	if (!NameLetters || !GoldLetters)
-	{
-		return;
-	}
-	NameLetters->ClearInstances();
-	GoldLetters->ClearInstances();
-
-	// "<NAME> WINS!" lying on the stage in front of the podium, and again on the far side turned round.
+	// "<NAME> WINS!" standing above each podium, facing the room, reading left to right for the viewers.
 	const FString Words = WinnerName + TEXT(" WINS!");
 	const float HalfWidth = RaceDotFont::TextWidth(Words) * LetterPixel * 0.5f;
-	const FVector PixelScale = FVector(LetterPixel * 0.94f, LetterPixel * 0.94f, LetterDepth) / 100.0f;
-	for (const float Side : { 1.0f, -1.0f })
+	const FVector PixelScale = FVector(LetterDepth, LetterPixel * 0.94f, LetterPixel * 0.94f) / 100.0f;
+	for (int32 DisplayIndex = 0; DisplayIndex < Displays.Num(); ++DisplayIndex)
 	{
+		UInstancedStaticMeshComponent* Name = NameLetters.IsValidIndex(DisplayIndex) ? NameLetters[DisplayIndex].Get() : nullptr;
+		UInstancedStaticMeshComponent* Wins = GoldLetters.IsValidIndex(DisplayIndex) ? GoldLetters[DisplayIndex].Get() : nullptr;
+		if (!Name || !Wins)
+		{
+			continue;
+		}
+		Name->ClearInstances();
+		Wins->ClearInstances();
 		for (int32 Index = 0; Index < Words.Len(); ++Index)
 		{
 			for (int32 GlyphY = 0; GlyphY < RaceDotFont::GlyphHeight; ++GlyphY)
 			{
 				for (int32 GlyphX = 0; GlyphX < RaceDotFont::GlyphWidth; ++GlyphX)
 				{
-					if (!RaceDotFont::IsLit(Words[Index], GlyphX, GlyphY))
+					if (RaceDotFont::IsLit(Words[Index], GlyphX, GlyphY))
 					{
-						continue;
+						const FVector Location(LetterSetBack,
+							HalfWidth - (Index * RaceDotFont::Advance + GlyphX + 0.5f) * LetterPixel,
+							LetterBottom + (RaceDotFont::GlyphHeight - GlyphY - 0.5f) * LetterPixel);
+						(Index < WinnerName.Len() ? Name : Wins)->AddInstance(FTransform(FRotator::ZeroRotator, Location, PixelScale));
 					}
-					// Reading along -X for someone on the -Y side (tops of the letters away from them); seen from above
-					// (the floor camera) that reads the right way round, not mirrored.
-					FVector Location(HalfWidth - (Index * RaceDotFont::Advance + GlyphX + 0.5f) * LetterPixel,
-						-LetterRowOffset + (RaceDotFont::GlyphHeight * 0.5f - GlyphY - 0.5f) * LetterPixel,
-						StageThickness + LetterDepth * 0.5f + 1.0f);
-					if (Side > 0.0f)
-					{
-						Location.X = -Location.X;
-						Location.Y = -Location.Y;
-					}
-					(Index < WinnerName.Len() ? NameLetters : GoldLetters)->AddInstance(FTransform(FRotator::ZeroRotator, Location, PixelScale));
 				}
 			}
 		}
@@ -503,8 +494,11 @@ void ARaceCelebration::Celebrate(const FString& WinnerName, FColor Color, const 
 		NameMaterial->SetVectorParameterValue(TEXT("AO"), Linear * 0.75f);
 	}
 	BuildLetters(WinnerName);
-	Turntable->SetRelativeScale3D(FVector(0.01f));
-	Turntable->SetVisibility(true, true);
+	for (USceneComponent* Display : Displays)
+	{
+		Display->SetRelativeScale3D(FVector(0.01f));
+		Display->SetVisibility(true, true);
+	}
 
 	// Flag stand beside the finish line, facing out over the road.
 	const FVector2D Across(-FinishDirection.Y, FinishDirection.X);
@@ -531,7 +525,10 @@ void ARaceCelebration::Celebrate(const FString& WinnerName, FColor Color, const 
 void ARaceCelebration::Stop()
 {
 	bShowing = false;
-	Turntable->SetVisibility(false, true);
+	for (USceneComponent* Display : Displays)
+	{
+		Display->SetVisibility(false, true);
+	}
 	FlagRoot->SetVisibility(false, true);
 	for (UInstancedStaticMeshComponent* Group : ConfettiGroups)
 	{
@@ -586,9 +583,16 @@ void ARaceCelebration::Tick(float DeltaSeconds)
 	}
 	ShowTime += DeltaSeconds;
 
-	// The stage pops up and turns slowly, so the name reads from every corner in turn.
-	Turntable->SetRelativeScale3D(FVector(FMath::Max(EaseOutBack(FMath::Clamp(ShowTime / PopInSeconds, 0.0f, 1.0f)), 0.01f)));
-	Turntable->SetRelativeRotation(FRotator(0.0f, ShowTime * StageTurnRate, 0.0f));
+	// The displays pop up out of the ground; the trophies turn slowly.
+	const float Pop = FMath::Max(EaseOutBack(FMath::Clamp(ShowTime / PopInSeconds, 0.0f, 1.0f)), 0.01f);
+	for (USceneComponent* Display : Displays)
+	{
+		Display->SetRelativeScale3D(FVector(Pop));
+	}
+	for (UProceduralMeshComponent* Trophy : Trophies)
+	{
+		Trophy->SetRelativeRotation(FRotator(0.0f, ShowTime * TrophySpinRate, 0.0f));
+	}
 
 	UpdateFlag(ShowTime);
 	UpdateConfetti(DeltaSeconds);

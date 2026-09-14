@@ -12,9 +12,10 @@ class UStaticMesh;
 class UStaticMeshComponent;
 
 /**
- * Winner show for the room: a round stage turning slowly above the middle of the track with a podium, a low-poly gold
- * trophy and the winner's name in chunky block letters (laid out both ways round so every corner can read it); a
- * chequered flag waved beside the finish line; and confetti pouring from the roof.
+ * Winner show for the room. Beyond each side wall (the walls without a position board), facing into the room so they
+ * are seen upright on the wall projection: a podium with a big low-poly gold trophy turning on the top step and the
+ * winner's name in block letters above it. Plus a chequered flag waved beside the finish line and confetti pouring
+ * from the roof.
  */
 UCLASS()
 class XRP_TOPDOWNRACE_API ARaceCelebration : public AActor
@@ -44,8 +45,8 @@ private:
 		bool bLanded = false;
 	};
 
-	void BuildStage();
-	void BuildTrophy();
+	/** One podium, trophy and name board, facing into the room from beyond a side wall. */
+	void BuildDisplay(float Side);
 	void BuildLetters(const FString& WinnerName);
 	void UpdateFlag(float Time);
 	void LaunchPiece(FConfettiPiece& Piece, bool bFirstWave);
@@ -57,13 +58,20 @@ private:
 	UInstancedStaticMeshComponent* AddVoxels(USceneComponent* Parent, UMaterialInterface* Material);
 
 	UPROPERTY(VisibleAnywhere, Category = "Race")
-	TObjectPtr<USceneComponent> Turntable;
-
-	UPROPERTY(VisibleAnywhere, Category = "Race")
 	TObjectPtr<USceneComponent> FlagRoot;
 
+	/** Per side wall: the display root, its trophy, and the name / "WINS!" letters. */
 	UPROPERTY(Transient)
-	TObjectPtr<UProceduralMeshComponent> Trophy;
+	TArray<TObjectPtr<USceneComponent>> Displays;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UProceduralMeshComponent>> Trophies;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> NameLetters;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> GoldLetters;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UProceduralMeshComponent> FlagCloth;
@@ -72,13 +80,10 @@ private:
 	TObjectPtr<UStaticMeshComponent> FlagPole;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UInstancedStaticMeshComponent> NameLetters;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UInstancedStaticMeshComponent> GoldLetters;
-
-	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> NameMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> GoldMaterial;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UPrimitiveComponent>> Parts;

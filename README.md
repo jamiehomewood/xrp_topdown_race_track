@@ -49,8 +49,9 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
 - `RaceLaps` laps (default 5). Laps only count after passing both sector checkpoints. The race ends the moment
   the first car completes the last lap: everyone else is placed where they are, all cars roll to a stop, and the
   winner is celebrated for 11 s, then everyone is back on the grid:
-  - a round stage pops up above the middle of the track and turns slowly: a podium with a low-poly gold trophy
-    (built in code: a faceted revolved cup with handles) and "PLAYER n WINS!" in chunky block letters on both sides;
+  - beyond both side walls (the ones without a position board), facing the room so they're seen upright: a 2-1-3
+    podium pops up with a big low-poly gold trophy turning on the top step (built in code: a faceted revolved cup
+    with handles) and "PLAYER n WINS!" in chunky block letters above it against the sky;
   - a chequered flag is waved from a stand beside the finish line, out over the road;
   - confetti pours from the roof line of every wall down onto the floor, and a fanfare plays from every speaker.
 - **Slipstream**: right behind another car you gain up to +22 % top speed and +60 % acceleration, so you can
