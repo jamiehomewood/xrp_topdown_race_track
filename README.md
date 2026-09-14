@@ -7,11 +7,13 @@ of a 5 m × 6 m Igloo room, with a trees-and-sky backdrop on the walls.
 
 1. Install Unreal Engine **5.7** and Git with **Git LFS** (`git lfs install` once).
 2. `git clone https://github.com/jamiehomewood/xrp_topdown_race_track.git`
+   **Don't use GitHub's "Download ZIP"**: ZIP archives contain Git LFS pointer stubs instead of the real
+   `.uasset` / `.umap` files, so every asset would be broken.
 3. Open `xrp_TopDownRace/xrp_TopDownRace.uproject`. It starts in `/Game/RaceTrack/Maps/Lvl_RaceTrack`.
 
-The compiled editor module is committed, so the project opens without Visual Studio. If Unreal says the
-`xrp_TopDownRace` module is missing or out of date (e.g. a different 5.7 hotfix), install Visual Studio 2022
-with the "Game development with C++" workload and let the editor rebuild it.
+The compiled editor module (`Binaries/Win64`: dll, `.modules`, `.target`) is committed, so the project opens
+on any UE 5.7.x without Visual Studio. If Unreal still asks to rebuild `xrp_TopDownRace`, install Visual Studio
+2022 with the "Game development with C++" workload and let the editor rebuild it.
 
 ## Layout
 
