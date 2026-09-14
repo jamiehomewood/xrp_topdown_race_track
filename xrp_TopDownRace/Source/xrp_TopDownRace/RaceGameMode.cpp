@@ -8,7 +8,9 @@
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "RaceCarPawn.h"
+#include "RaceInputSettings.h"
 #include "RacePlayerController.h"
+#include "HAL/IConsoleManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogRace, Log, All);
 
@@ -51,6 +53,12 @@ void ARaceGameMode::BeginPlay()
 	if (UGameViewportClient* Viewport = GetWorld()->GetGameViewport())
 	{
 		Viewport->SetForceDisableSplitscreen(true);
+	}
+
+	// The desktop window is only a monitor; spend the GPU on the Igloo capture cameras instead.
+	if (IConsoleVariable* ScreenPercentage = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage")))
+	{
+		ScreenPercentage->Set(GetDefault<URaceInputSettings>()->DesktopViewScreenPercentage, ECVF_SetByGameSetting);
 	}
 
 	for (int32 ControllerId = 0; ControllerId < MaxPlayers; ++ControllerId)

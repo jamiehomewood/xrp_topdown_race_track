@@ -24,4 +24,12 @@ public:
 private:
 	bool bJoinButtonHeld = false;
 	float AutoDriveLogTimer = 0.0f;
+	int32 AutoDriveFrames = 0;
+	FVector AutoDriveLastLocation = FVector::ZeroVector;
+	bool bAutoDriveHasLastLocation = false;
+	float AutoDriveSteerSign = 1.0f;
+	float AutoDriveProbeTimer = 0.0f;
+	float AutoDriveFlipHold = 0.0f;
+	FVector AutoDriveProbeLocation = FVector::ZeroVector;
+	int32 AutoDriveEscapes = 0;
 };

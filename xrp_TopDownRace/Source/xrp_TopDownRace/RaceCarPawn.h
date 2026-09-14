@@ -78,6 +78,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
 	float FullSteerSpeed = 700.0f;
 
+	/** Steering kept at a standstill while throttle or brake is held, so a car pinned on a wall can turn away. */
+	UPROPERTY(EditAnywhere, Category = "Race|Handling", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MinSteerScale = 0.5f;
+
 	/** How quickly sideways sliding is killed (higher = grippier, lower = driftier). */
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
 	float Grip = 6.0f;
@@ -89,7 +93,20 @@ public:
 private:
 	void ApplyMeshTransform();
 
+	/** Turn by YawDelta; if that would push the box into a wall, slide away from the wall first. */
+	void ApplyYaw(float YawDelta);
+
+	/** Push out of any wall the car starts the frame inside (e.g. after a car-on-car shove). */
+	void ResolvePenetration();
+
+	bool IsBlockedAt(const FVector& Location, const FQuat& Rotation) const;
+
+	/** Moves Location away from the last wall hit until the box fits at Rotation. */
+	bool FindFreeSpotNearby(FVector& Location, const FQuat& Rotation) const;
+
 	FVector Velocity = FVector::ZeroVector;
+	FVector LastWallNormal = FVector::ZeroVector;
+	float TimeSinceWallHit = 1000.0f;
 	float Throttle = 0.0f;
 	float Brake = 0.0f;
 	float Steer = 0.0f;

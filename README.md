@@ -32,8 +32,18 @@ World scale is **1 physical cm = 10 UU**: the room floor is 5000 × 6000 UU cent
 - Press any button on a controller to join; controller N drives car N (up to 4, join any time).
 - Pad: RT or A accelerate, LT or X brake/reverse, left stick or D-pad steer.
 - Keyboard (player 1): W/S or Up/Down, A/D or Left/Right; Enter/Space joins.
-- Project Settings › Game › Race Input toggles gamepad / keyboard input.
-- Console `race.AutoDrive 1`: every car joins and drives at full throttle (test without controllers).
+- Project Settings › Game › Race Settings toggles gamepad / keyboard input.
+- Console `race.AutoDrive 1`: every car joins and drives at full throttle (test without controllers);
+  `race.AutoDrive 2` also steers and, like a player, steers the other way when pinned on a wall. Both log
+  position, distance moved and FPS each second.
+
+## Performance
+
+Igloo renders its capture cameras (6 by default) plus the desktop window every frame, so the renderer is set up
+for cheap views: Lumen GI/reflections, hardware ray tracing, virtual shadow maps and mesh distance fields are off
+(`Config/DefaultEngine.ini`). The desktop window renders at `DesktopViewScreenPercentage` (Race Settings, default
+50 %); Igloo's captures always render at full size. If the room is still slow, lower the Igloo output with
+`-iglooSetResolution` or `-iglooNumCams`.
 
 ## Igloo / Spout
 
