@@ -1450,10 +1450,12 @@ void ARaceGameMode::ChangeTrack()
 	if (bNewTrack)
 	{
 		FRandomStream Random(Seed != 0 ? Seed + TrackNumber : FMath::Rand());
+		const URaceInputSettings* RaceSettings = GetDefault<URaceInputSettings>();
+		const int32 Rows = RaceSettings->TrackGrid == ERaceTrackGrid::Mixed ? 0 : int32(RaceSettings->TrackGrid) + 1;
 		for (int32 Try = 0; Try < 8; ++Try)
 		{
 			FRaceTrackLayout Candidate;
-			if (RaceTrackGenerator::Generate(Random, Candidate, GetDefault<URaceInputSettings>()->bNarrowTrackSections))
+			if (RaceTrackGenerator::Generate(Random, Candidate, RaceSettings->bNarrowTrackSections, Rows))
 			{
 				Layout = MoveTemp(Candidate);
 				if (Layout.Name != CurrentLayout.Name)
@@ -1596,6 +1598,48 @@ void ARaceGameMode::RunTrackSurvey(int32 Count)
 	UE_LOG(LogRace, Log, TEXT("race.TrackSurvey %s"), *FString::Join(CornerText, TEXT(", ")));
 	UE_LOG(LogRace, Log, TEXT("race.TrackSurvey narrow stretches per track: none x%d, one x%d, two x%d; narrowest road %.0f UU"),
 		NarrowingCounts.FindRef(0), NarrowingCounts.FindRef(1), NarrowingCounts.FindRef(2), NarrowestWidth);
+	// Each fixed grid setting (TrackGrid): every layout valid and really on that many rows.
+	for (const int32 Rows : { 2, 3, 4 })
+	{
+		FRandomStream RowRandom(777 + Rows);
+		TMap<int32, int32> RowCorners;
+		int32 RowFailed = 0;
+		int32 WrongRows = 0;
+		float RowMinLap = TNumericLimits<float>::Max();
+		float RowMaxLap = 0.0f;
+		const int32 RowCount = FMath::Max(1, Count / 4);
+		for (int32 Index = 0; Index < RowCount; ++Index)
+		{
+			FRaceTrackLayout Layout;
+			if (!RaceTrackGenerator::Generate(RowRandom, Layout, true, Rows) || !RaceTrackGenerator::Validate(Layout).IsEmpty())
+			{
+				++RowFailed;
+				continue;
+			}
+			FString Shape;
+			Layout.Name.Split(TEXT(" "), &Shape, nullptr);
+			int32 Separators = 0;
+			for (const TCHAR Character : Shape)
+			{
+				Separators += Character == TEXT('/') ? 1 : 0;
+			}
+			WrongRows += Separators + 1 != Rows ? 1 : 0;
+			++RowCorners.FindOrAdd(Layout.ControlPoints.Num());
+			FRaceTrackPath Path;
+			Path.Build(Layout.ControlPoints, Layout.StartLine, Layout.Narrowings);
+			RowMinLap = FMath::Min(RowMinLap, Path.GetLapLength());
+			RowMaxLap = FMath::Max(RowMaxLap, Path.GetLapLength());
+		}
+		RowCorners.KeySort([](int32 A, int32 B) { return A < B; });
+		TArray<FString> Mix;
+		for (const TPair<int32, int32>& Corners : RowCorners)
+		{
+			Mix.Add(FString::Printf(TEXT("%d corners x%d"), Corners.Key, Corners.Value));
+		}
+		UE_LOG(LogRace, Log, TEXT("race.TrackSurvey %d rows only: %d layouts, %d failed, %d on the wrong grid, %s, lap %.0f-%.0f UU"),
+			Rows, RowCount, RowFailed, WrongRows, *FString::Join(Mix, TEXT(", ")), RowMinLap, RowMaxLap);
+	}
+
 	Shapes.ValueSort([](int32 A, int32 B) { return A > B; });
 	for (const TPair<FString, int32>& Shape : Shapes)
 	{

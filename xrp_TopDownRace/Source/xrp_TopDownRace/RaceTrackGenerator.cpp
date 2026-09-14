@@ -62,13 +62,13 @@ FRaceTrackLayout RaceTrackGenerator::Classic()
 	return Layout;
 }
 
-bool RaceTrackGenerator::Generate(FRandomStream& Random, FRaceTrackLayout& OutLayout, bool bNarrowSections)
+bool RaceTrackGenerator::Generate(FRandomStream& Random, FRaceTrackLayout& OutLayout, bool bNarrowSections, int32 ForcedRows)
 {
 	for (int32 Attempt = 0; Attempt < MaxAttempts; ++Attempt)
 	{
 		// Grid: 2 columns and 2-4 rows (4.5 m fits four), with random cut positions; every cell >= MinCellSize.
 		const float RowRoll = Random.FRand();
-		const int32 Rows = RowRoll < 0.35f ? 4 : (RowRoll < 0.8f ? 3 : 2);
+		const int32 Rows = (ForcedRows >= 2 && ForcedRows <= 4) ? ForcedRows : (RowRoll < 0.35f ? 4 : (RowRoll < 0.8f ? 3 : 2));
 		TArray<double> XCuts = { -CentreLimitX, RandomRange(Random, -CentreLimitX + MinCellSize, CentreLimitX - MinCellSize), CentreLimitX };
 		TArray<double> YCuts = { -CentreLimitY };
 		for (int32 Row = 1; Row < Rows; ++Row)

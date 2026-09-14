@@ -69,7 +69,8 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
 - A layout is the outline of a random group of cells on a 2-column, 2-4 row grid with random cut positions (the
   original track is one of them), so the road never crosses itself and corners are rounded right angles. The
   direction and the start straight are random too. Plain ovals (kept 10% of the time) and L-shapes (40%) are made
-  rarer in favour of twistier 8–12 corner layouts. Random tracks use a footprint 30 cm bigger on every side than the
+  rarer in favour of twistier 8–10 corner layouts. `TrackGrid` (menu: TRACK GRID) picks the grid: Mixed (2, 3
+  or 4 rows each race), or always 2 rows (compact ovals and L-shapes), 3 rows, or 4 rows (longest, twistiest). Random tracks use a footprint 30 cm bigger on every side than the
   original (outer kerb ~36 cm, fence ~27 cm from the room walls). Each layout is checked before use: inside that footprint,
   straights long enough for the corners, grass between neighbouring stretches of road, a lap of at least 9 m,
   and a straight with room for the grid behind the start line.
@@ -90,7 +91,7 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   button (or B / Esc) closes it. It shows on boards on the front and back walls in the room and on the desktop.
 - Up/Down (stick, D-pad, arrows, W/S) picks a row, Left/Right changes it (hold to repeat), A / Enter runs an action.
   While the menu is open that player's car gets no input; the other cars keep racing.
-- Rows: laps, new track each race, narrow sections, slipstream, CPU pace / mistakes / spins / easing off, top speed, acceleration, steering, grip,
+- Rows: laps, new track each race, narrow sections, track grid, slipstream, CPU pace / mistakes / spins / easing off, top speed, acceleration, steering, grip,
   handbrake grip, wall and car bounce, engine and beep volume, idle time before a player's car goes back to the CPU,
   then RESTART RACE, RESET ALL TO DEFAULTS and CLOSE. Changes apply straight away (CPU pace from the next race).
 - Changes are saved when the menu closes, per machine, to `Saved/RaceSettings.ini` (only values that differ from

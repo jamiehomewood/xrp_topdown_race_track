@@ -25,8 +25,11 @@ namespace RaceTrackGenerator
 	/** The original hand-made track. */
 	XRP_TOPDOWNRACE_API FRaceTrackLayout Classic();
 
-	/** A random valid layout, usually with one or two narrow stretches if bNarrowSections; false only if none was found (use Classic then). */
-	XRP_TOPDOWNRACE_API bool Generate(FRandomStream& Random, FRaceTrackLayout& OutLayout, bool bNarrowSections = true);
+	/**
+	 * A random valid layout, usually with one or two narrow stretches if bNarrowSections, on a grid of Rows rows
+	 * (2-4; anything else = a random mix). False only if none was found (use Classic then).
+	 */
+	XRP_TOPDOWNRACE_API bool Generate(FRandomStream& Random, FRaceTrackLayout& OutLayout, bool bNarrowSections = true, int32 Rows = 0);
 
 	/** Why a layout can't be raced on, or an empty string if it's fine. */
 	XRP_TOPDOWNRACE_API FString Validate(const FRaceTrackLayout& Layout);

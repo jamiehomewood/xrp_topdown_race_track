@@ -4,6 +4,7 @@
 #include "Misc/Paths.h"
 #include "RaceCarPawn.h"
 #include "RaceInputSettings.h"
+#include "UObject/EnumProperty.h"
 #include "UObject/UnrealType.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogRaceMenu, Log, All);
@@ -34,6 +35,7 @@ void FRaceSettingsMenu::Initialise()
 	AddValue(TEXT("LAPS"), Race, TEXT("RaceLaps"), 1, 20, 1, EFormat::Integer);
 	AddToggle(TEXT("NEW TRACK EACH RACE"), Race, TEXT("bNewTrackEachRace"));
 	AddToggle(TEXT("NARROW SECTIONS"), Race, TEXT("bNarrowTrackSections"));
+	AddValue(TEXT("TRACK GRID"), Race, TEXT("TrackGrid"), 0, 0, 1, EFormat::Integer); // range comes from the enum
 	AddToggle(TEXT("SLIPSTREAM"), Race, TEXT("bDraftingEnabled"));
 
 	// Computer drivers (pace is rolled per car at the start of each race).
@@ -68,11 +70,18 @@ void FRaceSettingsMenu::Initialise()
 bool FRaceSettingsMenu::AddProperty(FItem& Item, const TCHAR* PropertyName)
 {
 	Item.Property = FindFProperty<FProperty>(Item.Class, PropertyName);
-	if (!Item.Property || !(CastField<FNumericProperty>(Item.Property) || CastField<FBoolProperty>(Item.Property)))
+	if (!Item.Property || !(CastField<FNumericProperty>(Item.Property) || CastField<FBoolProperty>(Item.Property) || CastField<FEnumProperty>(Item.Property)))
 	{
-		UE_LOG(LogRaceMenu, Warning, TEXT("race.Menu: %s has no number or on/off property '%s'; row '%s' left out."),
+		UE_LOG(LogRaceMenu, Warning, TEXT("race.Menu: %s has no number, on/off or choice property '%s'; row '%s' left out."),
 			*Item.Class->GetName(), PropertyName, *Item.Label);
 		return false;
+	}
+	if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Item.Property))
+	{
+		// Step through the enum's entries (NumEnums includes the hidden _MAX entry).
+		Item.Min = 0.0;
+		Item.Max = double(FMath::Max(0, EnumProperty->GetEnum()->NumEnums() - 2));
+		Item.Step = 1.0;
 	}
 	Item.DefaultValue = ProjectDefaults().FindOrAdd(SaveKey(Item), GetValue(Item));
 	Items.Add(Item);
@@ -84,7 +93,7 @@ void FRaceSettingsMenu::AddValue(const TCHAR* Label, UClass* Class, const TCHAR*
 	FItem Item;
 	Item.Label = Label;
 	Item.Class = Class;
-	Item.Min = Min;
+	Item.Min = Min;   // (choice properties get their range from the enum in AddProperty)
 	Item.Max = Max;
 	Item.Step = Step;
 	Item.Format = Format;
@@ -118,6 +127,10 @@ double FRaceSettingsMenu::GetValue(const FItem& Item)
 	{
 		return Bool->GetPropertyValue_InContainer(Defaults) ? 1.0 : 0.0;
 	}
+	if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Item.Property))
+	{
+		return double(EnumProperty->GetUnderlyingProperty()->GetSignedIntPropertyValue(EnumProperty->ContainerPtrToValuePtr<void>(Defaults)));
+	}
 	if (const FNumericProperty* Number = CastField<FNumericProperty>(Item.Property))
 	{
 		const void* Value = Number->ContainerPtrToValuePtr<void>(Defaults);
@@ -136,6 +149,10 @@ void FRaceSettingsMenu::SetValue(const FItem& Item, double Value)
 	if (const FBoolProperty* Bool = CastField<FBoolProperty>(Item.Property))
 	{
 		Bool->SetPropertyValue_InContainer(Defaults, Value > 0.5);
+	}
+	else if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Item.Property))
+	{
+		EnumProperty->GetUnderlyingProperty()->SetIntPropertyValue(EnumProperty->ContainerPtrToValuePtr<void>(Defaults), int64(FMath::RoundToDouble(Value)));
 	}
 	else if (const FNumericProperty* Number = CastField<FNumericProperty>(Item.Property))
 	{
@@ -161,6 +178,10 @@ FString FRaceSettingsMenu::FormatValue(const FItem& Item)
 	if (CastField<FBoolProperty>(Item.Property))
 	{
 		return Value > 0.5 ? TEXT("ON") : TEXT("OFF");
+	}
+	if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Item.Property))
+	{
+		return EnumProperty->GetEnum()->GetDisplayNameTextByValue(int64(FMath::RoundToDouble(Value))).ToString().ToUpper();
 	}
 	switch (Item.Format)
 	{

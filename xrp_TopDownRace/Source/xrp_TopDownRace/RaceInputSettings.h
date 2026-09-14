@@ -4,6 +4,16 @@
 #include "Engine/DeveloperSettings.h"
 #include "RaceInputSettings.generated.h"
 
+/** How many rows of cells random tracks are laid out on (the room fits 2 columns and up to 4 rows). */
+UENUM()
+enum class ERaceTrackGrid : uint8
+{
+	Mixed UMETA(DisplayName = "Mixed (2-4 rows)"),
+	TwoRows UMETA(DisplayName = "2 rows"),
+	ThreeRows UMETA(DisplayName = "3 rows"),
+	FourRows UMETA(DisplayName = "4 rows"),
+};
+
 /**
  * Project Settings > Game > Race Settings.
  * Stored in Config/DefaultGame.ini under [/Script/xrp_TopDownRace.RaceInputSettings].
@@ -35,6 +45,13 @@ public:
 	/** Random tracks usually get one or two narrow stretches on straights where not every car fits through side by side. */
 	UPROPERTY(Config, EditAnywhere, Category = "Race")
 	bool bNarrowTrackSections = true;
+
+	/**
+	 * Grid random tracks are made on: Mixed picks 2, 3 or 4 rows each race; 2 rows gives compact ovals and L-shapes,
+	 * 4 rows the longest and twistiest layouts (up to 10 corners).
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Race")
+	ERaceTrackGrid TrackGrid = ERaceTrackGrid::Mixed;
 
 	/** Slipstream: a car close behind another goes faster, so it can pull out and overtake. */
 	UPROPERTY(Config, EditAnywhere, Category = "Race")
