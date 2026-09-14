@@ -45,6 +45,16 @@ ARacePlayerController::ARacePlayerController()
 	bAutoManageActiveCameraTarget = false;
 }
 
+void ARacePlayerController::ApplyRoomAudioListener()
+{
+	// The view target is a camera far above the track looking straight down, which would make 3D panning
+	// meaningless. The room's speakers surround the floor, so listen from the floor centre, level, facing the
+	// configured front wall. Cars are then panned to the speakers on the side of the room they are on.
+	const FVector RoomCentre(0.0f, 0.0f, 50.0f);
+	SetAudioListenerOverride(nullptr, RoomCentre, FRotator(0.0f, GetDefault<URaceInputSettings>()->AudioFrontYaw, 0.0f));
+	bRoomListenerApplied = true;
+}
+
 int32 ARacePlayerController::GetSlotIndex() const
 {
 	const ULocalPlayer* LocalPlayer = GetLocalPlayer();
@@ -64,6 +74,10 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 	if (AActor* TrackCamera = GameMode->GetTrackCamera(); TrackCamera && GetViewTarget() != TrackCamera)
 	{
 		SetViewTarget(TrackCamera);
+	}
+	if (!bRoomListenerApplied)
+	{
+		ApplyRoomAudioListener();
 	}
 
 	ARaceCarPawn* Car = GameMode->GetCarForSlot(GetSlotIndex());

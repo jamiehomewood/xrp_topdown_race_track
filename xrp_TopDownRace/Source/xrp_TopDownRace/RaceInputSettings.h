@@ -43,4 +43,17 @@ public:
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Performance")
 	bool bRenderIglooCeilingCamera = false;
+
+	/**
+	 * Which way the room's front speakers face, as a world yaw in degrees. The listener sits at the centre of
+	 * the room floor looking this way, so a car in that direction plays from the front speakers.
+	 * 0 = world +X, the top of the desktop TrackCamera view (the start line's left-hand wall in that view).
+	 * Rotate in steps of 90 to match the physical front wall. Windows must be set to the room's speaker layout (5.1).
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Audio", meta = (ClampMin = "-180.0", ClampMax = "180.0"))
+	float AudioFrontYaw = 0.0f;
+
+	/** Overall level of the car engine sounds. */
+	UPROPERTY(Config, EditAnywhere, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float EngineVolume = 1.0f;
 };

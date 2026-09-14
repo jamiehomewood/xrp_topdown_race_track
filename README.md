@@ -47,6 +47,23 @@ capture camera is switched off at runtime (`bRenderIglooCeilingCamera`, Race Set
 stays black and the feed layout is unchanged. If the room is still slow, lower the Igloo output with
 `-iglooSetResolution` or `-iglooNumCams`.
 
+## Audio
+
+Each car has a procedural engine voice (`RaceEngineSynth`, no sound assets): pitch follows speed, roar follows
+throttle, and wall/car hits add a scrape. Sounds are 3D at the car, and the audio listener sits at the centre of
+the room floor, so each car is panned to the speakers on its side of the room as it drives around.
+
+- Windows' sound device on the room PC must be set to the room's speaker layout (e.g. 5.1); Unreal outputs to
+  whatever channel count Windows reports.
+- Race Settings > `AudioFrontYaw`: which world direction the front speakers face (0 = top of the desktop view).
+- Race Settings > `EngineVolume`: overall car sound level.
+- `Config/DefaultEngine.ini` > `[AudioChannelAzimuthMap]`: set the real angle of each speaker (degrees clockwise
+  from front) so panning matches the room rather than a home-theatre layout. Centre-speaker panning is on.
+- Console `race.RecordAudio 30` records the mixed output to `Saved/BouncedWavFiles/RaceAudio.wav` and logs car
+  positions, for checking the panning without being in the room; add `race.AudioSweep 1` to hold car 1 on a circle
+  round the listener in 45-degree steps (one measurement per speaker direction).
+- `[Audio] UnfocusedVolumeMultiplier=1.0` keeps the sound on when the game window isn't focused (e.g. behind Igloo).
+
 ## Igloo / Spout
 
 `IglooManager` sits at the scene centre and follows `IglooViewpoint` (room eye height, 1700 UU). It sends the

@@ -60,6 +60,14 @@ private:
 	/** race.IglooCameraReport: log each Igloo camera's direction and sampled image brightness. */
 	void ReportIglooCameras();
 
+	/** race.RecordAudio test aid: records the master mix and traces car positions for panning analysis. */
+	void UpdateAudioRecording(float DeltaSeconds);
+
+	enum class EAudioRecordingState : uint8 { Waiting, Recording, Done };
+	EAudioRecordingState AudioRecordingState = EAudioRecordingState::Waiting;
+	float AudioRecordingTimer = 0.0f;
+	float AudioTraceTimer = 0.0f;
+
 	TArray<TWeakObjectPtr<USceneCaptureComponent2D>> KnownIglooCaptures;
 	TArray<TWeakObjectPtr<USceneCaptureComponent2D>> DisabledCeilingCaptures;
 	float IglooScanTimer = 1.0f;

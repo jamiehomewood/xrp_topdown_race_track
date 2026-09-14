@@ -22,6 +22,10 @@ public:
 	int32 GetSlotIndex() const;
 
 private:
+	/** Puts the audio listener at the room centre facing Race Settings > AudioFrontYaw (not on the high top-down camera). */
+	void ApplyRoomAudioListener();
+
+	bool bRoomListenerApplied = false;
 	bool bJoinButtonHeld = false;
 	float AutoDriveLogTimer = 0.0f;
 	int32 AutoDriveFrames = 0;

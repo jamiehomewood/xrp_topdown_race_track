@@ -5,6 +5,7 @@
 #include "RaceCarPawn.generated.h"
 
 class UBoxComponent;
+class URaceEngineSynth;
 class UStaticMesh;
 class UStaticMeshComponent;
 
@@ -41,6 +42,13 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Category = "Race|Car")
 	TObjectPtr<UStaticMeshComponent> Body;
+
+	/** Spatialized engine voice; plays while the car is in the race. */
+	UPROPERTY(VisibleAnywhere, Category = "Race|Car")
+	TObjectPtr<URaceEngineSynth> EngineSound;
+
+	/** Give this car its own engine pitch (by grid slot). */
+	void SetEngineVoice(int32 Slot);
 
 	/** Uniform size of the car relative to the Fab mesh (real-car scale). Collision and ride height follow. */
 	UPROPERTY(EditAnywhere, Category = "Race|Car", meta = (ClampMin = "0.1"))
@@ -107,6 +115,7 @@ private:
 	FVector Velocity = FVector::ZeroVector;
 	FVector LastWallNormal = FVector::ZeroVector;
 	float TimeSinceWallHit = 1000.0f;
+	float TimeSinceImpactSound = 1000.0f;
 	float Throttle = 0.0f;
 	float Brake = 0.0f;
 	float Steer = 0.0f;

@@ -5,6 +5,9 @@
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "RaceEngineSynth.h"
+#include "RaceInputSettings.h"
+#include "Sound/SoundAttenuation.h"
 
 namespace
 {
@@ -16,6 +19,13 @@ namespace
 	 * bounce a car pinned on a wall gets every frame, or its steering flips back and forth and it can't turn out.
 	 */
 	constexpr float ReverseSteerSpeed = 150.0f;
+
+	/** Engine pitch per grid slot, so the four cars are distinguishable by ear. */
+	constexpr float EngineVoicePitches[] = { 1.0f, 0.8f, 1.22f, 0.9f };
+
+	/** Minimum into-the-wall speed (UU/s) for a hit to make a crash sound, and the gap between crash sounds. */
+	constexpr float ImpactSoundMinSpeed = 300.0f;
+	constexpr float ImpactSoundInterval = 0.15f;
 }
 
 ARaceCarPawn::ARaceCarPawn()
@@ -30,6 +40,31 @@ ARaceCarPawn::ARaceCarPawn()
 	Body = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Body"));
 	Body->SetupAttachment(Collision);
 	Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	// Spatialized at the car: the listener sits at the room centre (see ARacePlayerController), so the
+	// audio engine pans each car to the speakers in its direction.
+	EngineSound = CreateDefaultSubobject<URaceEngineSynth>(TEXT("EngineSound"));
+	EngineSound->SetupAttachment(Collision);
+	EngineSound->bAutoActivate = false;
+	EngineSound->bAllowSpatialization = true;
+	EngineSound->bOverrideAttenuation = true;
+	FSoundAttenuationSettings& Attenuation = EngineSound->AttenuationOverrides;
+	Attenuation.bAttenuate = true;
+	Attenuation.bSpatialize = true;
+	Attenuation.AttenuationShape = EAttenuationShape::Sphere;
+	Attenuation.AttenuationShapeExtents = FVector(800.0f, 0.0f, 0.0f); // full volume within 8 m (0.8 m in the room)
+	Attenuation.FalloffDistance = 6000.0f;                              // gentle fade: a car at the far end is still clearly heard
+	Attenuation.DistanceAlgorithm = EAttenuationDistanceModel::Linear;
+	// Cars crossing right past the room centre blend across all speakers instead of flicking between them.
+	Attenuation.NonSpatializedRadiusStart = 500.0f;
+	Attenuation.NonSpatializedRadiusEnd = 150.0f;
+	Attenuation.bEnableOcclusion = false;
+	Attenuation.bEnableReverbSend = false;
+}
+
+void ARaceCarPawn::SetEngineVoice(int32 Slot)
+{
+	EngineSound->SetVoicePitch(EngineVoicePitches[FMath::Abs(Slot) % UE_ARRAY_COUNT(EngineVoicePitches)]);
 }
 
 void ARaceCarPawn::OnConstruction(const FTransform& Transform)
@@ -99,12 +134,20 @@ void ARaceCarPawn::Activate(const FTransform& SpawnTransform)
 	SetActorHiddenInGame(false);
 	SetActorEnableCollision(true);
 	bActive = true;
+
+	EngineSound->SetVolumeMultiplier(GetDefault<URaceInputSettings>()->EngineVolume);
+	EngineSound->SetEngineState(0.0f, 0.0f);
+	EngineSound->Start();
 }
 
 void ARaceCarPawn::Deactivate()
 {
 	bActive = false;
 	Velocity = FVector::ZeroVector;
+	if (EngineSound->IsPlaying())
+	{
+		EngineSound->Stop();
+	}
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
 }
@@ -183,6 +226,7 @@ void ARaceCarPawn::Tick(float DeltaSeconds)
 
 	const float Dt = FMath::Min(DeltaSeconds, 1.0f / 20.0f);
 	TimeSinceWallHit += Dt;
+	TimeSinceImpactSound += Dt;
 	ResolvePenetration();
 
 	FVector Forward = GetActorForwardVector().GetSafeNormal2D();
@@ -228,6 +272,11 @@ void ARaceCarPawn::Tick(float DeltaSeconds)
 		LastWallNormal = Normal;
 		TimeSinceWallHit = 0.0f;
 		const float IntoWall = FVector::DotProduct(Velocity, Normal);
+		if (IntoWall < -ImpactSoundMinSpeed && TimeSinceImpactSound >= ImpactSoundInterval)
+		{
+			TimeSinceImpactSound = 0.0f;
+			EngineSound->TriggerImpact(FMath::Clamp(-IntoWall / MaxSpeed * 1.5f, 0.2f, 1.0f));
+		}
 		if (IntoWall < 0.0f)
 		{
 			Velocity -= (1.0f + WallBounce) * IntoWall * Normal;
@@ -235,4 +284,6 @@ void ARaceCarPawn::Tick(float DeltaSeconds)
 		const FVector Remaining = FVector::VectorPlaneProject(Delta * (1.0f - Hit.Time), Normal);
 		AddActorWorldOffset(Remaining, true);
 	}
+
+	EngineSound->SetEngineState(FMath::Abs(FVector::DotProduct(Velocity, Forward)) / MaxSpeed, FMath::Max(Throttle, Brake));
 }

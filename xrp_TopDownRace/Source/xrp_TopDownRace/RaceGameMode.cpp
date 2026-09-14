@@ -1,5 +1,6 @@
 #include "RaceGameMode.h"
 
+#include "AudioMixerBlueprintLibrary.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -11,6 +12,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "RaceCarPawn.h"
+#include "RaceEngineSynth.h"
 #include "RaceInputSettings.h"
 #include "RacePlayerController.h"
 #include "HAL/IConsoleManager.h"
@@ -19,6 +21,14 @@ DEFINE_LOG_CATEGORY_STATIC(LogRace, Log, All);
 
 namespace
 {
+	TAutoConsoleVariable<float> CVarRaceRecordAudio(
+		TEXT("race.RecordAudio"), 0.0f,
+		TEXT("Test aid: 5 s into play, record the master audio mix for this many seconds to Saved/BouncedWavFiles/RaceAudio.wav, logging car positions every 0.1 s (race.AudioTrace) to check speaker panning."));
+
+	TAutoConsoleVariable<int32> CVarRaceAudioSweep(
+		TEXT("race.AudioSweep"), 0,
+		TEXT("Test aid, with race.RecordAudio: hold car 1 on a circle around the audio listener, stepping 45 degrees every 1.5 s, so each speaker direction gets a clean measurement."));
+
 	TAutoConsoleVariable<int32> CVarRaceIglooCameraReport(
 		TEXT("race.IglooCameraReport"), 0,
 		TEXT("Log each Igloo capture camera's direction, capture mode and sampled image brightness 8 seconds into play."));
@@ -108,6 +118,8 @@ void ARaceGameMode::Tick(float DeltaSeconds)
 		}
 	}
 
+	UpdateAudioRecording(DeltaSeconds);
+
 	if (!bIglooReported && CVarRaceIglooCameraReport.GetValueOnGameThread() > 0)
 	{
 		IglooReportTimer += DeltaSeconds;
@@ -116,6 +128,61 @@ void ARaceGameMode::Tick(float DeltaSeconds)
 			bIglooReported = true;
 			ReportIglooCameras();
 		}
+	}
+}
+
+void ARaceGameMode::UpdateAudioRecording(float DeltaSeconds)
+{
+	const float RecordSeconds = CVarRaceRecordAudio.GetValueOnGameThread();
+	if (RecordSeconds <= 0.0f || AudioRecordingState == EAudioRecordingState::Done)
+	{
+		return;
+	}
+
+	AudioRecordingTimer += DeltaSeconds;
+	if (AudioRecordingState == EAudioRecordingState::Waiting)
+	{
+		if (AudioRecordingTimer >= 5.0f)
+		{
+			UAudioMixerBlueprintLibrary::StartRecordingOutput(this, RecordSeconds);
+			AudioRecordingState = EAudioRecordingState::Recording;
+			AudioRecordingTimer = 0.0f;
+			AudioTraceTimer = 0.0f;
+			UE_LOG(LogRace, Log, TEXT("race.RecordAudio: recording %.1f s, listener yaw %.0f"), RecordSeconds, GetDefault<URaceInputSettings>()->AudioFrontYaw);
+		}
+		return;
+	}
+
+	if (CVarRaceAudioSweep.GetValueOnGameThread() > 0 && Cars.Num() > 0 && Cars[0] && Cars[0]->IsActive())
+	{
+		// Car 1 on an 18 m circle round the listener, 45 degree steps relative to the room's front.
+		const int32 Step = FMath::FloorToInt(AudioRecordingTimer / 1.5f);
+		const float WorldAngle = FMath::DegreesToRadians(GetDefault<URaceInputSettings>()->AudioFrontYaw + 45.0f * Step);
+		const FVector Current = Cars[0]->GetActorLocation();
+		Cars[0]->SetActorLocation(FVector(1800.0f * FMath::Cos(WorldAngle), 1800.0f * FMath::Sin(WorldAngle), Current.Z), false, nullptr, ETeleportType::TeleportPhysics);
+	}
+
+	AudioTraceTimer += DeltaSeconds;
+	if (AudioTraceTimer >= 0.1f)
+	{
+		AudioTraceTimer = 0.0f;
+		for (int32 Slot = 0; Slot < Cars.Num(); ++Slot)
+		{
+			if (Cars[Slot] && Cars[Slot]->IsActive())
+			{
+				const FVector Location = Cars[Slot]->GetActorLocation();
+				const URaceEngineSynth* Voice = Cars[Slot]->EngineSound;
+				UE_LOG(LogRace, Log, TEXT("race.AudioTrace t=%.2f slot %d x %.0f y %.0f playing %d level %.3f"), AudioRecordingTimer, Slot, Location.X, Location.Y,
+					Voice && Voice->IsPlaying() ? 1 : 0, Voice ? Voice->GetRecentLevel() : 0.0f);
+			}
+		}
+	}
+
+	if (AudioRecordingTimer >= RecordSeconds)
+	{
+		UAudioMixerBlueprintLibrary::StopRecordingOutput(this, EAudioRecordingExportType::WavFile, TEXT("RaceAudio"), TEXT(""));
+		AudioRecordingState = EAudioRecordingState::Done;
+		UE_LOG(LogRace, Log, TEXT("race.RecordAudio: saved Saved/BouncedWavFiles/RaceAudio.wav"));
 	}
 }
 
@@ -233,6 +300,7 @@ void ARaceGameMode::EnsureCars()
 		{
 			Car->SetCarMesh(CarMeshes[Slot % CarMeshes.Num()].LoadSynchronous());
 		}
+		Car->SetEngineVoice(Slot);
 		Car->Deactivate();
 		Cars.Add(Car);
 	}

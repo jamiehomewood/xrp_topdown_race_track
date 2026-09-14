@@ -13,6 +13,7 @@ public class xrp_TopDownRace : ModuleRules
 			"Engine",
 			"InputCore",
 			"DeveloperSettings",
+			"AudioMixer",
 		});
 	}
 }
