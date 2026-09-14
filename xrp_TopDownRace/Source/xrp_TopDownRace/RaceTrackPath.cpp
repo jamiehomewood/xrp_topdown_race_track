@@ -1,21 +1,36 @@
 #include "RaceTrackPath.h"
 
-namespace
+TArray<FVector2D> FRaceTrackPath::ClassicControlPoints()
 {
-	// track_geom.py: CONTROL_POINTS (race order), CORNER_RADIUS, ARC_SEGMENTS, START_LINE_X.
-	const FVector2D ControlPoints[] = {
+	return {
 		{ -1450.0, -1950.0 }, { 1450.0, -1950.0 }, { 1450.0, 1950.0 }, { -1450.0, 1950.0 },
 		{ -1450.0, 850.0 }, { -50.0, 850.0 }, { -50.0, -650.0 }, { -1450.0, -650.0 },
 	};
-	constexpr double CornerRadius = 500.0;
-	constexpr int32 ArcSegments = 10;
-	constexpr double StartLineX = 300.0;
+}
+
+FVector2D FRaceTrackPath::ClassicStartLine()
+{
+	return FVector2D(300.0, -1950.0);
 }
 
 FRaceTrackPath::FRaceTrackPath()
 {
+	Build(ClassicControlPoints(), ClassicStartLine());
+}
+
+void FRaceTrackPath::Build(const TArray<FVector2D>& ControlPoints, const FVector2D& StartLine)
+{
+	Points.Reset();
+	CumulativeDistance.Reset();
+	LapLength = 0.0f;
+	StartLineDistance = 0.0f;
+
 	// Same corner filleting as track_geom.centreline().
-	const int32 NumControl = UE_ARRAY_COUNT(ControlPoints);
+	const int32 NumControl = ControlPoints.Num();
+	if (NumControl < 3)
+	{
+		return;
+	}
 	for (int32 Index = 0; Index < NumControl; ++Index)
 	{
 		const FVector2D& Previous = ControlPoints[(Index + NumControl - 1) % NumControl];
@@ -44,7 +59,7 @@ FRaceTrackPath::FRaceTrackPath()
 		Total += FVector2D::Distance(Points[Index], Points[(Index + 1) % Points.Num()]);
 	}
 	LapLength = float(Total);
-	StartLineDistance = GetDistanceAlong(FVector2D(StartLineX, ControlPoints[0].Y));
+	StartLineDistance = GetDistanceAlong(StartLine);
 }
 
 float FRaceTrackPath::WrapDistance(float Distance) const
@@ -73,8 +88,26 @@ float FRaceTrackPath::GetDistanceAlong(const FVector2D& Location) const
 	return BestAlong;
 }
 
+float FRaceTrackPath::GetDistanceToCentreline(const FVector2D& Location) const
+{
+	double BestDistanceSquared = TNumericLimits<double>::Max();
+	for (int32 Index = 0; Index < Points.Num(); ++Index)
+	{
+		const FVector2D& A = Points[Index];
+		const FVector2D Segment = Points[(Index + 1) % Points.Num()] - A;
+		const double LengthSquared = Segment.SizeSquared();
+		const double T = LengthSquared > 0.0 ? FMath::Clamp(((Location - A) | Segment) / LengthSquared, 0.0, 1.0) : 0.0;
+		BestDistanceSquared = FMath::Min(BestDistanceSquared, FVector2D::DistSquared(Location, A + Segment * T));
+	}
+	return float(FMath::Sqrt(BestDistanceSquared));
+}
+
 FVector2D FRaceTrackPath::GetPointAtDistance(float Distance, FVector2D* OutDirection) const
 {
+	if (Points.Num() < 2)
+	{
+		return FVector2D::ZeroVector;
+	}
 	const float Wrapped = WrapDistance(Distance);
 	int32 Index = Points.Num() - 1;
 	for (int32 Candidate = 0; Candidate < Points.Num() - 1; ++Candidate)

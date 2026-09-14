@@ -34,7 +34,10 @@ public:
 	 * Adds a board. BoardTransform places its centre; the lights run along the board's local +Y
 	 * (first light at -Y, i.e. the viewer's left when +Y is the viewer's right) and face its local +Z.
 	 */
-	void AddBoard(const FTransform& BoardTransform, float LightRadius, float Spacing);
+	int32 AddBoard(const FTransform& BoardTransform, float LightRadius, float Spacing);
+
+	/** Moves a board added earlier (the start gantry follows the start line when the track changes). */
+	void SetBoardTransform(int32 BoardIndex, const FTransform& BoardTransform);
 
 	/** 0 = all dark, 1..5 = that many lit, counting from the first light. Returns true if the count changed. */
 	bool SetLitCount(int32 Count);
@@ -51,6 +54,14 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> BaseMaterial;
+
+	/** Each board's meshes and their transforms relative to the board (the components are kept alive by Meshes). */
+	struct FBoardParts
+	{
+		TArray<UStaticMeshComponent*> Components;
+		TArray<FTransform> LocalTransforms;
+	};
+	TArray<FBoardParts> Boards;
 
 	int32 LitCount = -1;
 };

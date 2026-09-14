@@ -27,6 +27,7 @@
 #include "RaceInputSettings.h"
 #include "RacePlayerController.h"
 #include "RaceStartLights.h"
+#include "RaceTrackBuilder.h"
 #include "TextureResource.h"
 #include "UnrealClient.h"
 
@@ -55,6 +56,18 @@ namespace
 		TEXT("Speaker test: beep each output channel in turn (front left, front right, centre, back left/right, side left/right), naming it on the wall banner. ")
 		TEXT("Value = seconds of play before it starts (1 = now). Resets to 0 when started."));
 
+	TAutoConsoleVariable<int32> CVarRaceTrackSeed(
+		TEXT("race.TrackSeed"), 0,
+		TEXT("Test aid: 0 = a different random track each race; any other number = repeatable tracks (seed + track number)."));
+
+	TAutoConsoleVariable<float> CVarRaceTrackCycle(
+		TEXT("race.TrackCycle"), 0.0f,
+		TEXT("Test aid: restart the race (new track) every this many seconds."));
+
+	TAutoConsoleVariable<int32> CVarRaceTrackSurvey(
+		TEXT("race.TrackSurvey"), 0,
+		TEXT("Test aid: generate this many random tracks, check each one and log the shapes, lap lengths and any failures."));
+
 	TAutoConsoleVariable<FString> CVarRaceMenuTest(
 		TEXT("race.MenuTest"), TEXT(""),
 		TEXT("Test aid: \"<seconds>+<row>+<steps>\" - at that time player 1 opens the settings menu, moves down <row> rows, ")
@@ -82,9 +95,11 @@ namespace
 	/** Capture cameras whose view points more upward than this (forward Z) count as the ceiling camera. */
 	constexpr float CeilingForwardZ = 0.7f;
 
-	// Start line and grid (track_geom.START_LINE_X on the first straight).
-	constexpr float StartLineX = 300.0f;
-	constexpr float StartStraightY = -1950.0f;
+	// Start grid behind the line, and the height of the start-light gantry over it.
+	constexpr float GridFrontGap = 450.0f;
+	constexpr float GridRowSpacing = 650.0f;
+	constexpr float GridLaneOffset = 170.0f;
+	constexpr float GantryHeight = 260.0f;
 
 	// Race timing (seconds).
 	constexpr float GetReadySeconds = 4.0f;
@@ -224,15 +239,8 @@ ARaceGameMode::ARaceGameMode()
 		CarMeshes.Add(TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(FString::Printf(TEXT("%s/%s/StaticMeshes/%s.%s"), CarsRoot, Name, Name, Name))));
 	}
 
-	// 2 x 2 grid behind the start line, facing the race direction (+X).
-	for (int32 Row = 0; Row < 2; ++Row)
-	{
-		for (int32 Lane = 0; Lane < 2; ++Lane)
-		{
-			const FVector Location(StartLineX - 450.0f - Row * 650.0f, StartStraightY + (Lane == 0 ? -170.0f : 170.0f), 0.0f);
-			GridSlots.Add(FTransform(FRotator::ZeroRotator, Location));
-		}
-	}
+	// Grid on the original track until the first race builds its circuit.
+	UpdateGridSlots();
 }
 
 void ARaceGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
@@ -246,6 +254,13 @@ void ARaceGameMode::BeginPlay()
 
 	// Before the cars spawn, so they start with this machine's saved menu settings.
 	SettingsMenu.Initialise();
+
+	// The circuit is built at runtime (a new one each race); the level's editor-built track is only for the editor.
+	FActorSpawnParameters BuilderParams;
+	BuilderParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	TrackBuilder = GetWorld()->SpawnActor<ARaceTrackBuilder>(FVector::ZeroVector, FRotator::ZeroRotator, BuilderParams);
+	UE_LOG(LogRace, Log, TEXT("race.Track hid %d level track / floor scenery actors"), ARaceTrackBuilder::HideLevelTrack(GetWorld()));
+
 	EnsureCars();
 	SpawnRaceProps();
 
@@ -359,7 +374,7 @@ void ARaceGameMode::SpawnRaceProps()
 	if (StartLights)
 	{
 		// Gantry over the start line for the floor projection: lights across the road, facing up.
-		StartLights->AddBoard(FTransform(FRotator::ZeroRotator, FVector(StartLineX, StartStraightY, 260.0f)), 55.0f, 125.0f);
+		GantryBoard = StartLights->AddBoard(GetGantryTransform(), 55.0f, 125.0f);
 		// Big boards beyond the front and back walls, facing the room; first light on the viewer's left.
 		StartLights->AddBoard(FTransform(FRotationMatrix::MakeFromZY(FVector(0.0f, -1.0f, 0.0f), FVector(-1.0f, 0.0f, 0.0f)).ToQuat(),
 			FVector(0.0f, WallDisplayDistance, WallLightsHeight)), 150.0f, 380.0f);
@@ -471,6 +486,7 @@ void ARaceGameMode::Tick(float DeltaSeconds)
 	UpdateSpeakerTest(DeltaSeconds);
 	UpdateCaptures(DeltaSeconds);
 	UpdateMenuTest(DeltaSeconds);
+	UpdateTrackTests(DeltaSeconds);
 
 	if (!bIglooReported && CVarRaceIglooCameraReport.GetValueOnGameThread() > 0)
 	{
@@ -537,6 +553,7 @@ void ARaceGameMode::EnterPhase(ERacePhase NewPhase)
 	switch (NewPhase)
 	{
 	case ERacePhase::GetReady:
+		ChangeTrack();
 		RandomiseCarModels();
 		if (Celebration) { Celebration->Stop(); }
 		for (int32 Slot = 0; Slot < Cars.Num(); ++Slot)
@@ -1409,6 +1426,149 @@ AActor* ARaceGameMode::GetTrackCamera()
 	}
 	TrackCamera = Camera;
 	return TrackCamera;
+}
+
+void ARaceGameMode::ChangeTrack()
+{
+	const bool bNewTrack = GetDefault<URaceInputSettings>()->bNewTrackEachRace;
+	const int32 Seed = CVarRaceTrackSeed.GetValueOnGameThread();
+	FRaceTrackLayout Layout = RaceTrackGenerator::Classic();
+	if (bNewTrack)
+	{
+		FRandomStream Random(Seed != 0 ? Seed + TrackNumber : FMath::Rand());
+		for (int32 Try = 0; Try < 8; ++Try)
+		{
+			FRaceTrackLayout Candidate;
+			if (RaceTrackGenerator::Generate(Random, Candidate))
+			{
+				Layout = MoveTemp(Candidate);
+				if (Layout.Name != CurrentLayout.Name)
+				{
+					break; // not the same track as last race
+				}
+			}
+		}
+		if (Layout.Name == TEXT("classic"))
+		{
+			UE_LOG(LogRace, Warning, TEXT("race.Track no random track found; using the original"));
+		}
+	}
+	else if (bTrackBuilt && CurrentLayout.Name == Layout.Name)
+	{
+		return; // the original track is already built
+	}
+
+	CurrentLayout = Layout;
+	TrackPath.Build(Layout.ControlPoints, Layout.StartLine);
+	++TrackNumber;
+	if (TrackBuilder)
+	{
+		TrackBuilder->Build(TrackPath, Seed != 0 ? Seed + TrackNumber : FMath::Rand());
+	}
+	UpdateGridSlots();
+	if (StartLights && GantryBoard != INDEX_NONE)
+	{
+		StartLights->SetBoardTransform(GantryBoard, GetGantryTransform());
+	}
+	bTrackBuilt = true;
+	UE_LOG(LogRace, Log, TEXT("race.Track %d: %s, %d corners, lap %.0f UU"), TrackNumber, *Layout.Name, Layout.ControlPoints.Num(), TrackPath.GetLapLength());
+}
+
+void ARaceGameMode::UpdateGridSlots()
+{
+	// 2 x 2 behind the start line, facing the race direction; lane 0 on the right of the direction of travel.
+	GridSlots.Reset();
+	for (int32 Row = 0; Row < 2; ++Row)
+	{
+		for (int32 Lane = 0; Lane < 2; ++Lane)
+		{
+			FVector2D Direction;
+			FVector2D Point = TrackPath.GetPointAtDistance(TrackPath.GetStartLineDistance() - GridFrontGap - Row * GridRowSpacing, &Direction);
+			Point += FVector2D(-Direction.Y, Direction.X) * (Lane == 0 ? -GridLaneOffset : GridLaneOffset);
+			const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X));
+			GridSlots.Add(FTransform(FRotator(0.0f, Yaw, 0.0f), FVector(Point, 0.0)));
+		}
+	}
+}
+
+FTransform ARaceGameMode::GetGantryTransform() const
+{
+	// Lights across the road over the start line, facing up (the board's lights run along its local Y).
+	FVector2D Direction;
+	const FVector2D Line = TrackPath.GetPointAtDistance(TrackPath.GetStartLineDistance(), &Direction);
+	return FTransform(FRotator(0.0f, FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X)), 0.0f), FVector(Line, GantryHeight));
+}
+
+void ARaceGameMode::UpdateTrackTests(float DeltaSeconds)
+{
+	if (CaptureClock < 1.0f)
+	{
+		return; // let -ExecCmds set the cvars first
+	}
+	if (const int32 Survey = CVarRaceTrackSurvey.GetValueOnGameThread(); Survey > 0)
+	{
+		CVarRaceTrackSurvey->Set(0, ECVF_SetByConsole);
+		RunTrackSurvey(Survey);
+	}
+	const float Cycle = CVarRaceTrackCycle.GetValueOnGameThread();
+	if (Cycle > 0.0f)
+	{
+		TrackCycleTimer += DeltaSeconds;
+		if (TrackCycleTimer >= Cycle)
+		{
+			TrackCycleTimer = 0.0f;
+			EnterPhase(ERacePhase::GetReady);
+		}
+	}
+}
+
+void ARaceGameMode::RunTrackSurvey(int32 Count)
+{
+	const double StartTime = FPlatformTime::Seconds();
+	FRandomStream Random(12345);
+	TMap<FString, int32> Shapes;
+	TSet<FString> Named;
+	int32 Failed = 0;
+	float MinLap = TNumericLimits<float>::Max();
+	float MaxLap = 0.0f;
+	double TotalLap = 0.0;
+	int32 TotalCorners = 0;
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		FRaceTrackLayout Layout;
+		if (!RaceTrackGenerator::Generate(Random, Layout))
+		{
+			++Failed;
+			continue;
+		}
+		const FString Problem = RaceTrackGenerator::Validate(Layout);
+		if (!Problem.IsEmpty())
+		{
+			++Failed;
+			UE_LOG(LogRace, Warning, TEXT("race.TrackSurvey invalid layout %s: %s"), *Layout.Name, *Problem);
+			continue;
+		}
+		FRaceTrackPath Path;
+		Path.Build(Layout.ControlPoints, Layout.StartLine);
+		MinLap = FMath::Min(MinLap, Path.GetLapLength());
+		MaxLap = FMath::Max(MaxLap, Path.GetLapLength());
+		TotalLap += Path.GetLapLength();
+		TotalCorners += Layout.ControlPoints.Num();
+		Named.Add(Layout.Name);
+		FString Shape;
+		Layout.Name.Split(TEXT(" "), &Shape, nullptr);
+		++Shapes.FindOrAdd(Shape);
+	}
+	const int32 Good = Count - Failed;
+	const FString ClassicProblem = RaceTrackGenerator::Validate(RaceTrackGenerator::Classic());
+	UE_LOG(LogRace, Log, TEXT("race.TrackSurvey %d layouts in %.2f s: %d failed, %d cell shapes (%d with direction), lap %.0f-%.0f UU (mean %.0f), %.1f corners on average; original track check: %s"),
+		Count, FPlatformTime::Seconds() - StartTime, Failed, Shapes.Num(), Named.Num(), MinLap, MaxLap, Good > 0 ? TotalLap / Good : 0.0,
+		Good > 0 ? float(TotalCorners) / Good : 0.0f, ClassicProblem.IsEmpty() ? TEXT("OK") : *ClassicProblem);
+	Shapes.ValueSort([](int32 A, int32 B) { return A > B; });
+	for (const TPair<FString, int32>& Shape : Shapes)
+	{
+		UE_LOG(LogRace, Log, TEXT("race.TrackSurvey   %-12s x%d"), *Shape.Key, Shape.Value);
+	}
 }
 
 void ARaceGameMode::ToggleSettingsMenu(int32 SlotIndex)

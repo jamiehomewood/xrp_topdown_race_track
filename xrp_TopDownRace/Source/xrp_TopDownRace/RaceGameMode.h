@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "RaceSettingsMenu.h"
+#include "RaceTrackGenerator.h"
 #include "RaceTrackPath.h"
 #include "RaceGameMode.generated.h"
 
@@ -12,6 +13,7 @@ class ARaceCelebration;
 class ARaceDisplay;
 class ARacePlayerController;
 class ARaceStartLights;
+class ARaceTrackBuilder;
 class USceneCaptureComponent2D;
 class UStaticMesh;
 
@@ -119,7 +121,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Race")
 	TArray<TSoftObjectPtr<UStaticMesh>> CarMeshes;
 
-	/** Grid slot per player, behind the start line (track_geom.START_LINE_X on the y = -1950 straight). */
+	/** Grid slot per player: a 2 x 2 grid behind the current track's start line (rebuilt whenever the track changes). */
 	UPROPERTY(EditAnywhere, Category = "Race")
 	TArray<FTransform> GridSlots;
 
@@ -171,6 +173,24 @@ private:
 
 	/** Start-light beep from every speaker. */
 	void PlaySignal(float Frequency, float Seconds);
+
+	/** Next race's circuit: a new random one (Race Settings bNewTrackEachRace) or the original; builds it and moves the grid and gantry. */
+	void ChangeTrack();
+	void UpdateGridSlots();
+	FTransform GetGantryTransform() const;
+
+	/** race.TrackSurvey / race.TrackCycle test aids. */
+	void UpdateTrackTests(float DeltaSeconds);
+	void RunTrackSurvey(int32 Count);
+
+	FRaceTrackLayout CurrentLayout;
+	int32 TrackNumber = 0;
+	bool bTrackBuilt = false;
+	int32 GantryBoard = INDEX_NONE;
+	float TrackCycleTimer = 0.0f;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ARaceTrackBuilder> TrackBuilder;
 
 	/** Shows or hides the menu boards and updates their text. */
 	void RefreshSettingsMenu();

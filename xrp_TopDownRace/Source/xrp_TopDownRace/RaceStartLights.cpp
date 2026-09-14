@@ -67,15 +67,16 @@ UStaticMeshComponent* ARaceStartLights::AddMesh(UStaticMesh* Mesh, const FTransf
 	return Component;
 }
 
-void ARaceStartLights::AddBoard(const FTransform& BoardTransform, float LightRadius, float Spacing)
+int32 ARaceStartLights::AddBoard(const FTransform& BoardTransform, float LightRadius, float Spacing)
 {
 	UStaticMesh* Cylinder = LoadObject<UStaticMesh>(nullptr, CylinderPath);
 	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, CubePath);
 	UMaterialInterface* Material = GetBaseMaterial();
 	if (!Cylinder || !Cube || !Material)
 	{
-		return;
+		return INDEX_NONE;
 	}
+	const int32 BoardIndex = Boards.AddDefaulted();
 
 	// Dark housing slab just behind the lights.
 	const float Width = Spacing * (NumLights - 1) + LightRadius * 3.0f;
@@ -85,7 +86,8 @@ void ARaceStartLights::AddBoard(const FTransform& BoardTransform, float LightRad
 	HousingMaterial->SetVectorParameterValue(TEXT("Color"), HousingColor);
 	const FTransform HousingLocal(FRotator::ZeroRotator, FVector(0.0f, 0.0f, -Thickness * 0.5f - 6.0f),
 		FVector(Height / 100.0f, Width / 100.0f, Thickness / 100.0f));
-	AddMesh(Cube, HousingLocal * BoardTransform, HousingMaterial);
+	Boards[BoardIndex].Components.Add(AddMesh(Cube, HousingLocal * BoardTransform, HousingMaterial));
+	Boards[BoardIndex].LocalTransforms.Add(HousingLocal);
 
 	for (int32 Index = 0; Index < NumLights; ++Index)
 	{
@@ -93,8 +95,26 @@ void ARaceStartLights::AddBoard(const FTransform& BoardTransform, float LightRad
 		LightMaterial->SetVectorParameterValue(TEXT("Color"), Index < LitCount ? LitColor : DarkColor);
 		const FTransform LightLocal(FRotator::ZeroRotator, FVector(0.0f, (Index - (NumLights - 1) * 0.5f) * Spacing, 0.0f),
 			FVector(LightRadius * 2.0f / 100.0f, LightRadius * 2.0f / 100.0f, 0.1f));
-		AddMesh(Cylinder, LightLocal * BoardTransform, LightMaterial);
+		Boards[BoardIndex].Components.Add(AddMesh(Cylinder, LightLocal * BoardTransform, LightMaterial));
+		Boards[BoardIndex].LocalTransforms.Add(LightLocal);
 		LightMaterials.Add(LightMaterial);
+	}
+	return BoardIndex;
+}
+
+void ARaceStartLights::SetBoardTransform(int32 BoardIndex, const FTransform& BoardTransform)
+{
+	if (!Boards.IsValidIndex(BoardIndex))
+	{
+		return;
+	}
+	const FBoardParts& Board = Boards[BoardIndex];
+	for (int32 Index = 0; Index < Board.Components.Num(); ++Index)
+	{
+		if (Board.Components[Index])
+		{
+			Board.Components[Index]->SetRelativeTransform(Board.LocalTransforms[Index] * BoardTransform);
+		}
 	}
 }
 

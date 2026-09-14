@@ -32,6 +32,7 @@ void FRaceSettingsMenu::Initialise()
 	UClass* Car = ARaceCarPawn::StaticClass();
 
 	AddValue(TEXT("LAPS"), Race, TEXT("RaceLaps"), 1, 20, 1, EFormat::Integer);
+	AddToggle(TEXT("NEW TRACK EACH RACE"), Race, TEXT("bNewTrackEachRace"));
 	AddToggle(TEXT("SLIPSTREAM"), Race, TEXT("bDraftingEnabled"));
 
 	// Computer drivers (pace is rolled per car at the start of each race).

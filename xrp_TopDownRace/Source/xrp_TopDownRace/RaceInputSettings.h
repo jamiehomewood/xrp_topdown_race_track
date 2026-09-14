@@ -28,6 +28,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Race", meta = (ClampMin = "1", ClampMax = "50"))
 	int32 RaceLaps = 5;
 
+	/** A new random circuit (road, walls, fences and floor scenery) at the start of every race; off = always the original track. */
+	UPROPERTY(Config, EditAnywhere, Category = "Race")
+	bool bNewTrackEachRace = true;
+
 	/** Slipstream: a car close behind another goes faster, so it can pull out and overtake. */
 	UPROPERTY(Config, EditAnywhere, Category = "Race")
 	bool bDraftingEnabled = true;

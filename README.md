@@ -61,13 +61,27 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   players can catch up. Raise the pace values if the CPUs get too easy.
 - Project Settings › Game › Race Settings: laps, slipstream, computer drivers, input toggles, idle release, audio, performance.
 
+### Tracks (a new one every race)
+
+- With `bNewTrackEachRace` (on by default; also in the settings menu) every race gets a new random circuit, built
+  in the game when the cars line up: road, kerb walls, start line and gantry, a fence round the outside, and low
+  scenery scattered over the rest of the room floor. Turn it off to always race the original track.
+- A layout is the outline of a random group of cells on a 2-column grid with random cut positions (the original
+  track is one of them), so the road never crosses itself and corners are rounded right angles. The direction and
+  the start straight are random too. Each layout is checked before use: inside the walkway round the room edge,
+  straights long enough for the corners, grass between neighbouring stretches of road, a lap of at least 9 m,
+  and a straight with room for the grid behind the start line.
+- Laps, positions, slipstream and the computer drivers all follow whichever track is built.
+- The level still contains the editor-built original track and floor scenery (Tools/TrackGen); the game hides
+  them at start. The trees beyond the walls, the ground and the horizon are shared by every track.
+
 ### Settings menu (in game)
 
 - **Tab** on the keyboard, or the **View / Back** button on a controller, opens the menu for that player; the same
   button (or B / Esc) closes it. It shows on boards on the front and back walls in the room and on the desktop.
 - Up/Down (stick, D-pad, arrows, W/S) picks a row, Left/Right changes it (hold to repeat), A / Enter runs an action.
   While the menu is open that player's car gets no input; the other cars keep racing.
-- Rows: laps, slipstream, CPU pace / mistakes / spins / easing off, top speed, acceleration, steering, grip,
+- Rows: laps, new track each race, slipstream, CPU pace / mistakes / spins / easing off, top speed, acceleration, steering, grip,
   handbrake grip, wall and car bounce, engine and beep volume, idle time before a player's car goes back to the CPU,
   then RESTART RACE, RESET ALL TO DEFAULTS and CLOSE. Changes apply straight away (CPU pace from the next race).
 - Changes are saved when the menu closes, per machine, to `Saved/RaceSettings.ini` (only values that differ from
@@ -83,6 +97,8 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
 - Quick finish test: `-ini:Game:[/Script/xrp_TopDownRace.RaceInputSettings]:RaceLaps=1` gives one-lap races.
 - `race.MenuTest 8+6+1`: 8 s in, player 1 opens the settings menu, moves down 6 rows, changes it one step and
   closes (saves) 4 s later.
+- `race.TrackSurvey 2000` generates and checks that many random tracks and logs the shapes and lap lengths;
+  `race.TrackSeed N` makes the tracks repeatable; `race.TrackCycle 10` restarts the race on a new track every 10 s.
 
 ## Performance
 
