@@ -5,6 +5,7 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "RaceSignalSynth.h"
 
 namespace
 {
@@ -26,6 +27,17 @@ ARaceStartLights::ARaceStartLights()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+
+	SignalSound = CreateDefaultSubobject<URaceSignalSynth>(TEXT("SignalSound"));
+	SignalSound->SetupAttachment(RootComponent);
+	SignalSound->bAutoActivate = false;
+	SignalSound->bAllowSpatialization = false;
+}
+
+void ARaceStartLights::BeginPlay()
+{
+	Super::BeginPlay();
+	SignalSound->Start();
 }
 
 UMaterialInterface* ARaceStartLights::GetBaseMaterial()
@@ -86,12 +98,12 @@ void ARaceStartLights::AddBoard(const FTransform& BoardTransform, float LightRad
 	}
 }
 
-void ARaceStartLights::SetLitCount(int32 Count)
+bool ARaceStartLights::SetLitCount(int32 Count)
 {
 	Count = FMath::Clamp(Count, 0, NumLights);
 	if (Count == LitCount)
 	{
-		return;
+		return false;
 	}
 	LitCount = Count;
 	for (int32 Index = 0; Index < LightMaterials.Num(); ++Index)
@@ -101,4 +113,5 @@ void ARaceStartLights::SetLitCount(int32 Count)
 			LightMaterials[Index]->SetVectorParameterValue(TEXT("Color"), (Index % NumLights) < Count ? LitColor : DarkColor);
 		}
 	}
+	return true;
 }

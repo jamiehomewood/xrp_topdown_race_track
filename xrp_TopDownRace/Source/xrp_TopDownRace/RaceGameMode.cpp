@@ -1,6 +1,9 @@
 #include "RaceGameMode.h"
 
+#include "AudioDevice.h"
 #include "AudioMixerBlueprintLibrary.h"
+#include "AudioMixerDevice.h"
+#include "RaceSignalSynth.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -45,6 +48,21 @@ namespace
 		TEXT("race.AudioSweep"), 0,
 		TEXT("Test aid, with race.RecordAudio: hold car 1 on a circle around the audio listener, stepping 45 degrees every 1.5 s, so each speaker direction gets a clean measurement."));
 
+	TAutoConsoleVariable<float> CVarRaceSpeakerTest(
+		TEXT("race.SpeakerTest"), 0.0f,
+		TEXT("Speaker test: beep each output channel in turn (front left, front right, centre, back left/right, side left/right), naming it on the wall banner. ")
+		TEXT("Value = seconds of play before it starts (1 = now). Resets to 0 when started."));
+
+	// Start-light signals.
+	constexpr float LightBeepHz = 880.0f;
+	constexpr float LightBeepSeconds = 0.25f;
+	constexpr float GoBeepHz = 1320.0f;
+	constexpr float GoBeepSeconds = 0.7f;
+	constexpr float SpeakerTestHz = 1000.0f;
+	constexpr float SpeakerTestBeepSeconds = 0.8f;
+	constexpr float SpeakerTestStepSeconds = 1.5f;
+	constexpr int32 MinRoomAudioChannels = 6;
+
 	TAutoConsoleVariable<int32> CVarRaceIglooCameraReport(
 		TEXT("race.IglooCameraReport"), 0,
 		TEXT("Log each Igloo capture camera's direction, capture mode and sampled image brightness 8 seconds into play."));
@@ -84,7 +102,22 @@ namespace
 	constexpr float DriverStuckSpeed = 120.0f;
 	constexpr float DriverStuckSeconds = 1.0f;
 	constexpr float DriverReverseSeconds = 0.9f;
-	constexpr float DriverSkillMin = 0.92f;
+	constexpr float DriverSkillMin = 0.85f;
+	constexpr float DriverMistakeGapMin = 4.0f;       // seconds between mistakes for the weakest driver...
+	constexpr float DriverMistakeGapMax = 12.0f;      // ...scaled up to this for the best
+	constexpr float DriverWobbleAtWorstSkill = 0.35f; // steering wobble amplitude at DriverSkillMin
+
+	const TCHAR* MistakeName(EDriverMistake Mistake)
+	{
+		switch (Mistake)
+		{
+		case EDriverMistake::LateBraking: return TEXT("late braking");
+		case EDriverMistake::RunWide: return TEXT("running wide");
+		case EDriverMistake::Oversteer: return TEXT("oversteer");
+		case EDriverMistake::Hesitation: return TEXT("hesitation");
+		default: return TEXT("none");
+		}
+	}
 
 	// Room layout (1 physical cm = 10 UU; the front wall is +Y). Wall displays stand just beyond the room walls
 	// (y = +-3000) but inside the tree ring, so the wall projection shows them near their real size. Everything
@@ -147,8 +180,10 @@ ARaceGameMode::ARaceGameMode()
 	PlayerControllerClass = ARacePlayerController::StaticClass();
 	DefaultPawnClass = nullptr;
 
+	// Every road vehicle in the Fab car pack (the pack's aeroplane is left out). Each race picks four at random.
 	const TCHAR* CarsRoot = TEXT("/Game/Fab/Mobile_Optimize-Free_Low_Poly_Cars");
-	for (const TCHAR* Name : { TEXT("Sport_Car_39"), TEXT("N_Muscle_Car_10"), TEXT("Hatchback_Car_15"), TEXT("Police_Car_N_4") })
+	for (const TCHAR* Name : { TEXT("Sport_Car_39"), TEXT("N_Muscle_Car_10"), TEXT("Hatchback_Car_15"), TEXT("Police_Car_N_4"),
+		TEXT("Classic_Car_9"), TEXT("N_Van_10"), TEXT("Pick_Up_11"), TEXT("Military_Vehicle_3"), TEXT("Monster_Truck_15") })
 	{
 		CarMeshes.Add(TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(FString::Printf(TEXT("%s/%s/StaticMeshes/%s.%s"), CarsRoot, Name, Name, Name))));
 	}
@@ -197,8 +232,84 @@ void ARaceGameMode::BeginPlay()
 	}
 	UE_LOG(LogRace, Log, TEXT("Race ready: %d cars, lap length %.0f UU, %d laps. Press any button on a controller to take a car."),
 		Cars.Num(), TrackPath.GetLapLength(), GetDefault<URaceInputSettings>()->RaceLaps);
+	LogAudioDevice();
 
 	EnterPhase(ERacePhase::GetReady);
+}
+
+void ARaceGameMode::LogAudioDevice()
+{
+	FAudioDeviceHandle DeviceHandle = GetWorld()->GetAudioDevice();
+	if (!DeviceHandle.IsValid())
+	{
+		UE_LOG(LogRace, Warning, TEXT("race.Audio: no audio device (sound disabled?)"));
+		return;
+	}
+	const Audio::FMixerDevice* MixerDevice = static_cast<Audio::FMixerDevice*>(DeviceHandle.GetAudioDevice());
+	const Audio::FAudioPlatformDeviceInfo& Info = MixerDevice->GetPlatformDeviceInfo();
+	AudioDeviceName = Info.Name;
+	AudioChannelCount = Info.NumChannels;
+
+	TArray<FString> ChannelNames;
+	for (const EAudioMixerChannel::Type Channel : Info.OutputChannelArray)
+	{
+		ChannelNames.Add(EAudioMixerChannel::ToString(Channel));
+	}
+	UE_LOG(LogRace, Log, TEXT("race.Audio output device '%s': %d channels (%s), %d Hz"),
+		*Info.Name, Info.NumChannels, *FString::Join(ChannelNames, TEXT(", ")), Info.SampleRate);
+	if (AudioChannelCount < MinRoomAudioChannels)
+	{
+		UE_LOG(LogRace, Warning, TEXT("race.Audio only %d output channels: the room's speakers need the multichannel device as Windows' default output, set to 7.1."),
+			AudioChannelCount);
+	}
+}
+
+void ARaceGameMode::PlaySignal(float Frequency, float Seconds)
+{
+	if (StartLights && StartLights->SignalSound)
+	{
+		StartLights->SignalSound->Beep(Frequency, Seconds, 0.6f * GetDefault<URaceInputSettings>()->SignalVolume);
+	}
+}
+
+void ARaceGameMode::UpdateSpeakerTest(float DeltaSeconds)
+{
+	const float StartAfter = CVarRaceSpeakerTest.GetValueOnGameThread();
+	if (SpeakerTestChannel == INDEX_NONE && StartAfter > 0.0f && CaptureClock >= StartAfter)
+	{
+		// Reset at console priority: a lower-priority reset is ignored after the value was typed in the console.
+		CVarRaceSpeakerTest->Set(0.0f, ECVF_SetByConsole);
+		SpeakerTestChannel = 0;
+		SpeakerTestTimer = 0.0f;
+		UE_LOG(LogRace, Log, TEXT("race.SpeakerTest start (device '%s', %d channels)"), *AudioDeviceName, AudioChannelCount);
+	}
+	if (SpeakerTestChannel == INDEX_NONE)
+	{
+		return;
+	}
+
+	SpeakerTestTimer -= DeltaSeconds;
+	if (SpeakerTestTimer > 0.0f)
+	{
+		return;
+	}
+	if (SpeakerTestChannel == URaceSignalSynth::LowFrequencyChannel)
+	{
+		++SpeakerTestChannel; // the sub isn't a directional speaker
+	}
+	if (SpeakerTestChannel >= URaceSignalSynth::NumOutputChannels || !StartLights || !StartLights->SignalSound)
+	{
+		SpeakerTestChannel = INDEX_NONE;
+		DiagnosticBanner.Reset();
+		UE_LOG(LogRace, Log, TEXT("race.SpeakerTest done"));
+		return;
+	}
+
+	StartLights->SignalSound->Beep(SpeakerTestHz, SpeakerTestBeepSeconds, 0.6f * GetDefault<URaceInputSettings>()->SignalVolume, 1u << SpeakerTestChannel);
+	DiagnosticBanner = FString::Printf(TEXT("SPEAKER TEST: %s  (%d CH)"), URaceSignalSynth::ChannelName(SpeakerTestChannel), AudioChannelCount);
+	UE_LOG(LogRace, Log, TEXT("race.SpeakerTest channel %d %s"), SpeakerTestChannel, URaceSignalSynth::ChannelName(SpeakerTestChannel));
+	SpeakerTestTimer = SpeakerTestStepSeconds;
+	++SpeakerTestChannel;
 }
 
 void ARaceGameMode::SpawnRaceProps()
@@ -295,6 +406,7 @@ void ARaceGameMode::Tick(float DeltaSeconds)
 	}
 
 	UpdateAudioRecording(DeltaSeconds);
+	UpdateSpeakerTest(DeltaSeconds);
 	UpdateCaptures(DeltaSeconds);
 
 	if (!bIglooReported && CVarRaceIglooCameraReport.GetValueOnGameThread() > 0)
@@ -324,7 +436,11 @@ void ARaceGameMode::UpdateRacePhase(float DeltaSeconds)
 	case ERacePhase::Lights:
 		if (StartLights)
 		{
-			StartLights->SetLitCount(FMath::FloorToInt(PhaseTime / LightInterval));
+			const int32 Lit = FMath::Min(FMath::FloorToInt(PhaseTime / LightInterval), ARaceStartLights::NumLights);
+			if (StartLights->SetLitCount(Lit) && Lit > 0)
+			{
+				PlaySignal(LightBeepHz, LightBeepSeconds);
+			}
 		}
 		if (PhaseTime >= LightInterval * ARaceStartLights::NumLights + LightsHoldTime)
 		{
@@ -367,6 +483,7 @@ void ARaceGameMode::EnterPhase(ERacePhase NewPhase)
 	switch (NewPhase)
 	{
 	case ERacePhase::GetReady:
+		RandomiseCarModels();
 		for (int32 Slot = 0; Slot < Cars.Num(); ++Slot)
 		{
 			Cars[Slot]->PlaceOnGrid(GridSlots.IsValidIndex(Slot) ? GridSlots[Slot] : FTransform::Identity);
@@ -374,6 +491,8 @@ void ARaceGameMode::EnterPhase(ERacePhase NewPhase)
 			Stats[Slot] = FRaceCarStats();
 			ComputerDrivers[Slot] = FComputerDriverState();
 			ComputerDrivers[Slot].Skill = FMath::FRandRange(DriverSkillMin, 1.0f);
+			ComputerDrivers[Slot].NextMistakeIn = FMath::FRandRange(3.0f, 9.0f);
+			ComputerDrivers[Slot].WobblePhase = FMath::FRandRange(0.0f, 100.0f);
 		}
 		if (StartLights) { StartLights->SetLitCount(0); }
 		break;
@@ -395,6 +514,7 @@ void ARaceGameMode::EnterPhase(ERacePhase NewPhase)
 			Cars[Slot]->SetControlsLocked(false);
 		}
 		if (StartLights) { StartLights->SetLitCount(0); }
+		PlaySignal(GoBeepHz, GoBeepSeconds);
 		break;
 
 	case ERacePhase::Finishing:
@@ -605,23 +725,68 @@ void ARaceGameMode::ComputeComputerDriverInput(int32 SlotIndex, float DeltaTime,
 		// Reversing flips the steering sense, so steer away from the aim to swing the nose towards it.
 		const float AimAngle = AngleTo(Aim);
 		Driver.ReverseSteer = FMath::Abs(AimAngle) < 5.0f ? 1.0f : -FMath::Sign(AimAngle);
-		UE_LOG(LogRace, Verbose, TEXT("race.Driver car %d stuck, backing out"), SlotIndex + 1);
+		UE_LOG(LogRace, Log, TEXT("race.Driver car %d stuck, backing out"), SlotIndex + 1);
 		return;
 	}
 
+	// Mistakes: every so often (more often for weaker drivers) the driver fluffs something for a moment.
+	if (Driver.MistakeTimeLeft > 0.0f)
+	{
+		Driver.MistakeTimeLeft -= DeltaTime;
+		if (Driver.MistakeTimeLeft <= 0.0f)
+		{
+			Driver.Mistake = EDriverMistake::None;
+		}
+	}
+	else if ((Driver.NextMistakeIn -= DeltaTime) <= 0.0f && Speed > 500.0f)
+	{
+		Driver.Mistake = static_cast<EDriverMistake>(FMath::RandRange(1, 4));
+		Driver.MistakeTimeLeft = FMath::FRandRange(0.6f, 1.4f);
+		const float SkillAlpha = (Driver.Skill - DriverSkillMin) / (1.0f - DriverSkillMin);
+		Driver.NextMistakeIn = FMath::Lerp(DriverMistakeGapMin, DriverMistakeGapMax, SkillAlpha) * FMath::FRandRange(0.7f, 1.3f);
+		UE_LOG(LogRace, Log, TEXT("race.Mistake car %d: %s"), SlotIndex + 1, MistakeName(Driver.Mistake));
+	}
+
+	// Which way the next corner turns (positive = right), used for running wide.
+	const float CornerAngleSigned = AngleTo(TrackPath.GetPointAtDistance(Along + 900.0f + Speed * 0.45f));
+	const float CornerAngle = FMath::Abs(CornerAngleSigned);
+
 	// Deep in a slipstream means tucked right behind someone: move across to pass (even slots right, odd left).
 	const float PassSide = (SlotIndex % 2 == 0) ? 1.0f : -1.0f;
-	const float TargetLane = Car->GetDraftFactor() > DriverPassDraft ? PassSide * DriverPassLane : 0.0f;
+	float TargetLane = Car->GetDraftFactor() > DriverPassDraft ? PassSide * DriverPassLane : 0.0f;
+	if (Driver.Mistake == EDriverMistake::RunWide)
+	{
+		TargetLane = -FMath::Sign(CornerAngleSigned) * 320.0f; // outside of the corner
+	}
 	Driver.Lane = FMath::FInterpTo(Driver.Lane, TargetLane, DeltaTime, 2.0f);
 	Aim += FVector2D(-Direction.Y, Direction.X) * Driver.Lane;
-	OutSteer = FMath::Clamp(AngleTo(Aim) / 25.0f, -1.0f, 1.0f);
+
+	// Imperfect hands: a slow wobble that grows as skill drops.
+	Driver.WobblePhase += DeltaTime;
+	const float SkillAlpha = (Driver.Skill - DriverSkillMin) / (1.0f - DriverSkillMin);
+	const float Wobble = DriverWobbleAtWorstSkill * (1.0f - SkillAlpha) *
+		(FMath::Sin(Driver.WobblePhase * 1.7f) * 0.6f + FMath::Sin(Driver.WobblePhase * 4.3f + 1.3f) * 0.4f);
+	OutSteer = FMath::Clamp(AngleTo(Aim) / 25.0f + Wobble, -1.0f, 1.0f);
 
 	// Look further ahead to judge the next corner and slow down for it; skill scales corner and top speed.
-	const float CornerAngle = FMath::Abs(AngleTo(TrackPath.GetPointAtDistance(Along + 900.0f + Speed * 0.45f)));
-	const float CornerSpeed = (CornerAngle > 55.0f ? 850.0f : (CornerAngle > 30.0f ? 1250.0f : TNumericLimits<float>::Max())) * Driver.Skill;
+	float CornerSpeed = (CornerAngle > 55.0f ? 850.0f : (CornerAngle > 30.0f ? 1250.0f : TNumericLimits<float>::Max())) * Driver.Skill;
+	if (Driver.Mistake == EDriverMistake::LateBraking)
+	{
+		CornerSpeed *= 1.45f;
+	}
 	const float TopSpeed = Car->MaxSpeed * (1.0f + Car->DraftTopSpeedBonus * Car->GetDraftFactor()) * Driver.Skill;
 	OutThrottle = (Speed < CornerSpeed && Speed < TopSpeed) ? 1.0f : 0.0f;
 	OutBrake = Speed > CornerSpeed + 250.0f ? 0.7f : 0.0f;
+
+	if (Driver.Mistake == EDriverMistake::Hesitation)
+	{
+		OutThrottle *= 0.35f;
+	}
+	else if (Driver.Mistake == EDriverMistake::Oversteer && CornerAngle > 25.0f && Speed > 600.0f)
+	{
+		bOutHandbrake = Driver.MistakeTimeLeft > 0.8f; // a short snap of the handbrake, then catch it
+		OutSteer = FMath::Clamp(OutSteer * 1.5f, -1.0f, 1.0f);
+	}
 }
 
 void ARaceGameMode::RefreshDisplays()
@@ -687,7 +852,12 @@ void ARaceGameMode::RefreshDisplays()
 	FColor BannerColor = FColor::White;
 	switch (Phase)
 	{
-	case ERacePhase::GetReady: Banner = TEXT("GET READY"); break;
+	case ERacePhase::GetReady:
+		// Also flag a wrong audio device to whoever is running the room.
+		Banner = AudioChannelCount > 0 && AudioChannelCount < MinRoomAudioChannels
+			? FString::Printf(TEXT("GET READY   (AUDIO: %d CH)"), AudioChannelCount)
+			: FString(TEXT("GET READY"));
+		break;
 	case ERacePhase::Lights: Banner = TEXT(""); break;
 	case ERacePhase::Racing:
 		if (PhaseTime < GoBannerSeconds)
@@ -710,6 +880,12 @@ void ARaceGameMode::RefreshDisplays()
 			BannerColor = SlotColor(WinnerSlot);
 		}
 		break;
+	}
+
+	if (!DiagnosticBanner.IsEmpty())
+	{
+		Banner = DiagnosticBanner;
+		BannerColor = FColor::White;
 	}
 
 	const int32 LinesPerWall = 1 + WallRows;
@@ -997,6 +1173,35 @@ void ARaceGameMode::EnsureCars()
 	Stats.SetNum(Cars.Num());
 	ComputerDrivers.SetNum(Cars.Num());
 	PreviousRaceDistance.SetNumZeroed(Cars.Num());
+}
+
+void ARaceGameMode::RandomiseCarModels()
+{
+	if (CarMeshes.Num() == 0)
+	{
+		return;
+	}
+	TArray<int32> Picks;
+	for (int32 Index = 0; Index < CarMeshes.Num(); ++Index)
+	{
+		Picks.Add(Index);
+	}
+	// Shuffle, then deal one model per car (models repeat only if there are more cars than models).
+	for (int32 Index = Picks.Num() - 1; Index > 0; --Index)
+	{
+		Picks.Swap(Index, FMath::RandRange(0, Index));
+	}
+	TArray<FString> Chosen;
+	for (int32 Slot = 0; Slot < Cars.Num(); ++Slot)
+	{
+		const TSoftObjectPtr<UStaticMesh>& Model = CarMeshes[Picks[Slot % Picks.Num()]];
+		if (UStaticMesh* Mesh = Model.LoadSynchronous())
+		{
+			Cars[Slot]->SetCarMesh(Mesh);
+			Chosen.Add(FString::Printf(TEXT("car %d %s"), Slot + 1, *Mesh->GetName()));
+		}
+	}
+	UE_LOG(LogRace, Log, TEXT("race.Cars %s"), *FString::Join(Chosen, TEXT(", ")));
 }
 
 ARaceCarPawn* ARaceGameMode::GetCarForSlot(int32 SlotIndex)

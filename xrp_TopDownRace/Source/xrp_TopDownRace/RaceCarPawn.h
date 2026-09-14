@@ -82,8 +82,15 @@ public:
 	/** Give this car its own engine pitch (by grid slot). */
 	void SetEngineVoice(int32 Slot);
 
-	/** Uniform size of the car relative to the Fab mesh (real-car scale). Collision and ride height follow. */
-	UPROPERTY(EditAnywhere, Category = "Race|Car", meta = (ClampMin = "0.1"))
+	/**
+	 * Every vehicle model is scaled to this length (UU, nose to tail), so a van or monster truck races on equal
+	 * terms with a sports car. Collision and ride height follow the scaled mesh.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Race|Car", meta = (ClampMin = "50.0"))
+	float CarLength = 237.0f;
+
+	/** Scale applied to the current mesh to reach CarLength. */
+	UPROPERTY(VisibleAnywhere, Category = "Race|Car")
 	float CarScale = 0.5f;
 
 	/** Yaw applied to the mesh so its nose points down the actor's +X. */
@@ -113,21 +120,25 @@ public:
 
 	/** Degrees per second at full steer once above FullSteerSpeed. */
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float TurnRate = 210.0f;
+	float TurnRate = 240.0f;
 
 	/** Below this speed steering is scaled down, so a parked car can't spin on the spot. */
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float FullSteerSpeed = 700.0f;
+	float FullSteerSpeed = 450.0f;
 
 	/** Steering kept at a standstill while throttle or brake is held, so a car pinned on a wall can turn away. */
 	UPROPERTY(EditAnywhere, Category = "Race|Handling", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MinSteerScale = 0.5f;
+	float MinSteerScale = 0.6f;
 
 	/** How quickly sideways sliding is killed (higher = grippier, lower = driftier). */
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float Grip = 4.5f;
+	float Grip = 5.0f;
 
-	/** How quickly the car's spin settles back to what the steering asks for (lower = spins last longer). */
+	/** How quickly the turn rate follows the stick while steering (higher = snappier). */
+	UPROPERTY(EditAnywhere, Category = "Race|Handling")
+	float SteerResponse = 16.0f;
+
+	/** How quickly spin from a hit settles when not steering (lower = spins last longer). */
 	UPROPERTY(EditAnywhere, Category = "Race|Handling")
 	float SpinRecovery = 5.0f;
 

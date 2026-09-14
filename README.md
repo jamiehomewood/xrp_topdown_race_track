@@ -29,7 +29,10 @@ World scale is **1 physical cm = 10 UU**: the room floor is 5000 × 6000 UU cent
 
 ## Playing
 
-All four cars are always on track. Cars without a player are driven by the computer; pressing any button on
+All four cars are always on track, with models picked at random from the Fab car pack each race (all scaled to
+the same length so a van or monster truck isn't bigger than a sports car). Cars without a player are driven by
+the computer (each with its own skill, wobble and occasional mistakes: braking late, running wide, oversteer,
+hesitating); pressing any button on
 controller N takes car N over straight away, whatever the race is doing. A player's car has a pulsing disc in the
 player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey number. After 60 s without input
 (`IdleReleaseSeconds`) a car goes back to the computer.
@@ -87,6 +90,14 @@ the back wall.
 - Race Settings > `EngineVolume`: overall car sound level.
 - Quick check in the room: a car on the long straight should sound from the front wall, a car on the start-line
   straight from the back wall.
+- Start lights beep from every speaker (one beep per light, a higher tone at lights out); `SignalVolume` sets the level.
+- **If sound comes out of only one or two speakers**, Unreal isn't on the room's multichannel device: it plays to
+  Windows' *default* output device with that device's channel count. Make the room's audio interface the default
+  output, set its speaker configuration to 7.1, and restart the game. The game logs the device at start
+  (`race.Audio output device '...': N channels`) and shows `(AUDIO: N CH)` on the GET READY banner when fewer than
+  6 channels are available.
+- **Speaker test**: console `race.SpeakerTest 1` beeps each output channel in turn (front left, front right, centre,
+  back left/right, side left/right) and names it on the wall banner, to check the wiring.
 - Console `race.RecordAudio 30` records the mixed output to `Saved/BouncedWavFiles/RaceAudio.wav` and logs car
   positions, for checking the panning without being in the room; add `race.AudioSweep 1` to hold car 1 on a circle
   round the listener in 45-degree steps (one measurement per speaker direction).

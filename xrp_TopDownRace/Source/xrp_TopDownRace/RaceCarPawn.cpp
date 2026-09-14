@@ -184,8 +184,11 @@ void ARaceCarPawn::ApplyMeshTransform()
 		return;
 	}
 
-	// Fit the box to the scaled, rotated mesh footprint (slightly inset so glancing contacts feel fair).
+	// Scale the model to the standard car length, then fit the box to its footprint (slightly inset so glancing
+	// contacts feel fair).
 	const FBox Bounds = Mesh->GetBoundingBox();
+	const float MeshLength = MeshRotation.RotateVector(Bounds.GetSize()).GetAbs().X;
+	CarScale = MeshLength > 1.0f ? CarLength / MeshLength : 1.0f;
 	const FVector RotatedSize = MeshRotation.RotateVector(Bounds.GetSize() * CarScale).GetAbs();
 	const FVector Extent(RotatedSize.X * 0.47f, RotatedSize.Y * 0.47f, DefaultCarHalfHeight * CarScale);
 	Collision->SetBoxExtent(Extent);
@@ -385,7 +388,10 @@ void ARaceCarPawn::Tick(float DeltaSeconds)
 	}
 	const bool bReversing = ForwardSpeed < -ReverseSteerSpeed || (Brake > 0.0f && Throttle <= 0.0f && ForwardSpeed <= 1.0f);
 	const float SteerRate = Steer * TurnRate * SteerScale * (bReversing ? -1.0f : 1.0f);
-	AngularVelocity = FMath::FInterpTo(AngularVelocity, SteerRate, Dt, bHandbrake ? SpinRecovery * 0.4f : SpinRecovery);
+	// Snappy while the stick is held (the player is in charge); spin from a hit only settles slowly when not steering.
+	const bool bSteering = FMath::Abs(Steer) > 0.05f;
+	const float YawResponse = bHandbrake ? SpinRecovery * 0.4f : (bSteering ? SteerResponse : SpinRecovery);
+	AngularVelocity = FMath::FInterpTo(AngularVelocity, SteerRate, Dt, YawResponse);
 	ApplyYaw(AngularVelocity * Dt);
 	Forward = GetActorForwardVector().GetSafeNormal2D();
 	const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward);

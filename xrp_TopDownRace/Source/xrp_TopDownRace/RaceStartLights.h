@@ -6,6 +6,7 @@
 
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class URaceSignalSynth;
 class UStaticMesh;
 class UStaticMeshComponent;
 
@@ -21,7 +22,13 @@ class XRP_TOPDOWNRACE_API ARaceStartLights : public AActor
 public:
 	ARaceStartLights();
 
+	virtual void BeginPlay() override;
+
 	static constexpr int32 NumLights = 5;
+
+	/** Non-spatial beeps from every speaker: one per light, a higher tone at lights out, and the speaker test. */
+	UPROPERTY(VisibleAnywhere, Category = "Race")
+	TObjectPtr<URaceSignalSynth> SignalSound;
 
 	/**
 	 * Adds a board. BoardTransform places its centre; the lights run along the board's local +Y
@@ -29,8 +36,8 @@ public:
 	 */
 	void AddBoard(const FTransform& BoardTransform, float LightRadius, float Spacing);
 
-	/** 0 = all dark, 1..5 = that many lit, counting from the first light. */
-	void SetLitCount(int32 Count);
+	/** 0 = all dark, 1..5 = that many lit, counting from the first light. Returns true if the count changed. */
+	bool SetLitCount(int32 Count);
 
 private:
 	UStaticMeshComponent* AddMesh(UStaticMesh* Mesh, const FTransform& RelativeTransform, UMaterialInterface* Material);

@@ -68,4 +68,8 @@ public:
 	/** Overall level of the car engine sounds. */
 	UPROPERTY(Config, EditAnywhere, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "2.0"))
 	float EngineVolume = 1.0f;
+
+	/** Level of the start-light beeps and the speaker test (these play from every speaker at once). */
+	UPROPERTY(Config, EditAnywhere, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float SignalVolume = 1.0f;
 };

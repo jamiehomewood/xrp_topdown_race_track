@@ -39,6 +39,16 @@ struct FRaceCarStats
 	int32 Position = 0;
 };
 
+/** Ways a computer driver fluffs it for a moment. */
+enum class EDriverMistake : uint8
+{
+	None,
+	LateBraking,   // arrives at the corner too fast
+	RunWide,       // drifts to the outside of the corner
+	Oversteer,     // snaps the back out mid-corner
+	Hesitation,    // lifts off the throttle
+};
+
 /** The computer driver's memory for one car. */
 struct FComputerDriverState
 {
@@ -46,7 +56,11 @@ struct FComputerDriverState
 	float StuckTime = 0.0f;
 	float ReverseTime = 0.0f;    // backing out of a wall / pile-up
 	float ReverseSteer = 1.0f;
-	float Skill = 1.0f;          // scales cornering and top speed, re-rolled each race
+	float Skill = 1.0f;          // scales cornering, top speed and how often mistakes happen; re-rolled each race
+	EDriverMistake Mistake = EDriverMistake::None;
+	float MistakeTimeLeft = 0.0f;
+	float NextMistakeIn = 6.0f;
+	float WobblePhase = 0.0f;
 };
 
 /**
@@ -86,7 +100,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Race")
 	int32 MaxPlayers = 4;
 
-	/** Car model per slot (wraps if there are fewer entries than players). */
+	/** Vehicle models to choose from; each race gives the cars different random picks from this list. */
 	UPROPERTY(EditAnywhere, Category = "Race")
 	TArray<TSoftObjectPtr<UStaticMesh>> CarMeshes;
 
@@ -104,6 +118,9 @@ public:
 private:
 	void EnsureCars();
 	void SpawnRaceProps();
+
+	/** Gives every car a different random model from CarMeshes (before placing them on the grid). */
+	void RandomiseCarModels();
 	float Now() const;
 
 	// Race flow
@@ -127,6 +144,21 @@ private:
 
 	/** race.RecordAudio test aid: records the master mix and traces car positions for panning analysis. */
 	void UpdateAudioRecording(float DeltaSeconds);
+
+	/** Logs which audio device and how many output channels the game got (the room needs its multichannel device). */
+	void LogAudioDevice();
+
+	/** race.SpeakerTest: beep each output channel in turn, naming it on the wall banner. */
+	void UpdateSpeakerTest(float DeltaSeconds);
+
+	/** Start-light beep from every speaker. */
+	void PlaySignal(float Frequency, float Seconds);
+
+	FString AudioDeviceName;
+	int32 AudioChannelCount = 0;
+	int32 SpeakerTestChannel = INDEX_NONE;
+	float SpeakerTestTimer = 0.0f;
+	FString DiagnosticBanner;
 
 	FRaceTrackPath TrackPath;
 
