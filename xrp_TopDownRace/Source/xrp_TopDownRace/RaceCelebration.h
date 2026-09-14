@@ -10,7 +10,7 @@ class UTextRenderComponent;
 
 /**
  * Winner show for the room: the announcement floating just above the middle of the track, slowly turning so every
- * corner of the room can read it, and confetti raining down over the whole floor and settling on it.
+ * corner of the room can read it, and confetti pouring from the roof over the whole floor and settling on it.
  */
 UCLASS()
 class XRP_TOPDOWNRACE_API ARaceCelebration : public AActor
@@ -40,7 +40,8 @@ private:
 		bool bLanded = false;
 	};
 
-	void LaunchPiece(FConfettiPiece& Piece, bool bSpreadHeight);
+	/** Places a piece just above the roof line of the wall view it will fall past (higher for the opening burst). */
+	void LaunchPiece(FConfettiPiece& Piece, bool bFirstWave);
 	void UpdateConfetti(float DeltaSeconds);
 
 	UPROPERTY(VisibleAnywhere, Category = "Race")

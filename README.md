@@ -48,8 +48,8 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   Lights show on a gantry over the start line (floor) and on boards on the front and back walls.
 - `RaceLaps` laps (default 5). Laps only count after passing both sector checkpoints. The race ends the moment
   the first car completes the last lap: everyone else is placed where they are, all cars roll to a stop, and the
-  winner is celebrated for 11 s — "PLAYER n WINS!" turning slowly above the middle of the track, confetti raining
-  down over the room, a fanfare from every speaker — then everyone is back on the grid.
+  winner is celebrated for 11 s — "PLAYER n WINS!" turning slowly above the middle of the track, confetti pouring
+  from the roof line of every wall down onto the floor, a fanfare from every speaker — then everyone is back on the grid.
 - **Slipstream**: right behind another car you gain up to +22 % top speed and +60 % acceleration, so you can
   pull out and pass on the straights (`bDraftingEnabled`).
 - Displays: a floor panel in each room corner (player/CPU, position, lap, lap time, best, DRAFT) and a banner +

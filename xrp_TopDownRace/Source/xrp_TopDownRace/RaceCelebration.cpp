@@ -13,15 +13,23 @@ namespace
 	const TCHAR* MaterialPath = TEXT("/Game/RaceTrack/Materials/M_RaceLight.M_RaceLight");
 	const TCHAR* FallbackMaterialPath = TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial");
 
-	// Confetti over the room floor (5 m x 6 m = 5000 x 6000 UU), starting below the Igloo eye point (1700 UU)
-	// so nothing drifts right past the cameras.
+	// Confetti over the room floor (5 m x 6 m = 5000 x 6000 UU), falling from the roof. The Igloo cameras sit at
+	// the eye point above the room centre and each wall camera sees up to 45 degrees above it, so a piece at
+	// horizontal distance D (along the wall's axis) comes into view below EyeHeight + D: spawning just above that
+	// makes every piece appear where the wall meets the ceiling.
 	constexpr float RainHalfX = 2400.0f;
 	constexpr float RainHalfY = 2900.0f;
-	constexpr float RainTop = 1350.0f;
+	constexpr float EyeHeight = 1700.0f;
+	constexpr float EyeClearance = 500.0f;     // keep pieces from falling right past the cameras
+	constexpr float RoofMargin = 120.0f;
+	constexpr float FirstWaveStagger = 1300.0f; // extra height spread for the opening burst, so it pours in
+	constexpr float RefillStagger = 400.0f;
+	constexpr float FallSpeedMin = 420.0f;      // fast enough that pieces from the far walls land before the show ends
+	constexpr float FallSpeedMax = 580.0f;
 	constexpr float FloorZ = 6.0f;
-	constexpr float RainSeconds = 6.0f;   // keep re-launching landed pieces this long
-	constexpr int32 PiecesPerColour = 70;
-	const FVector PieceSize(45.0f, 28.0f, 3.0f); // UU (4.5 x 2.8 cm in the room)
+	constexpr float RainSeconds = 7.0f;   // keep re-launching landed pieces this long
+	constexpr int32 PiecesPerColour = 90;
+	const FVector PieceSize(55.0f, 34.0f, 3.0f); // UU (5.5 x 3.4 cm in the room)
 
 	// Unlit emissive colours, bright enough to pop against the grass and road.
 	const FLinearColor ConfettiColours[] = {
@@ -84,11 +92,22 @@ void ARaceCelebration::BeginPlay()
 	}
 }
 
-void ARaceCelebration::LaunchPiece(FConfettiPiece& Piece, bool bSpreadHeight)
+void ARaceCelebration::LaunchPiece(FConfettiPiece& Piece, bool bFirstWave)
 {
-	Piece.Location = FVector(FMath::FRandRange(-RainHalfX, RainHalfX), FMath::FRandRange(-RainHalfY, RainHalfY),
-		bSpreadHeight ? FMath::FRandRange(RainTop * 0.35f, RainTop) : RainTop + FMath::FRandRange(0.0f, 300.0f));
-	Piece.Velocity = FVector(FMath::FRandRange(-40.0f, 40.0f), FMath::FRandRange(-40.0f, 40.0f), -FMath::FRandRange(140.0f, 240.0f));
+	float X = 0.0f;
+	float Y = 0.0f;
+	float WallAxisDistance = 0.0f;
+	do
+	{
+		X = FMath::FRandRange(-RainHalfX, RainHalfX);
+		Y = FMath::FRandRange(-RainHalfY, RainHalfY);
+		WallAxisDistance = FMath::Max(FMath::Abs(X), FMath::Abs(Y));
+	}
+	while (WallAxisDistance < EyeClearance);
+
+	const float Stagger = FMath::FRandRange(0.0f, bFirstWave ? FirstWaveStagger : RefillStagger);
+	Piece.Location = FVector(X, Y, EyeHeight + WallAxisDistance + RoofMargin + Stagger);
+	Piece.Velocity = FVector(FMath::FRandRange(-40.0f, 40.0f), FMath::FRandRange(-40.0f, 40.0f), -FMath::FRandRange(FallSpeedMin, FallSpeedMax));
 	Piece.Rotation = FRotator(FMath::FRandRange(0.0f, 360.0f), FMath::FRandRange(0.0f, 360.0f), FMath::FRandRange(0.0f, 360.0f));
 	Piece.Spin = FRotator(FMath::FRandRange(-360.0f, 360.0f), FMath::FRandRange(-180.0f, 180.0f), FMath::FRandRange(-360.0f, 360.0f));
 	Piece.FlutterPhase = FMath::FRandRange(0.0f, UE_TWO_PI);
