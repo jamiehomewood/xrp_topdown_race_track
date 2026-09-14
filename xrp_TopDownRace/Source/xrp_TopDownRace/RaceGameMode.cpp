@@ -23,6 +23,7 @@
 #include "RaceCelebration.h"
 #include "RaceDisplay.h"
 #include "RaceEngineSynth.h"
+#include "RaceHUD.h"
 #include "RaceInputSettings.h"
 #include "RacePlayerController.h"
 #include "RaceStartLights.h"
@@ -53,6 +54,11 @@ namespace
 		TEXT("race.SpeakerTest"), 0.0f,
 		TEXT("Speaker test: beep each output channel in turn (front left, front right, centre, back left/right, side left/right), naming it on the wall banner. ")
 		TEXT("Value = seconds of play before it starts (1 = now). Resets to 0 when started."));
+
+	TAutoConsoleVariable<FString> CVarRaceMenuTest(
+		TEXT("race.MenuTest"), TEXT(""),
+		TEXT("Test aid: \"<seconds>+<row>+<steps>\" - at that time player 1 opens the settings menu, moves down <row> rows, ")
+		TEXT("changes that row by <steps> (negative = left) and closes the menu (saving) 4 s later."));
 
 	// Start-light signals.
 	constexpr float LightBeepHz = 880.0f;
@@ -147,6 +153,11 @@ namespace
 	constexpr float WallRowSpacing = 140.0f;
 	constexpr int32 WallRows = 4;
 
+	// Settings menu boards: just in front of the wall displays, covering them while open.
+	constexpr float MenuWallInset = 120.0f;
+	constexpr float MenuTitleHeight = 2800.0f;
+	constexpr float MenuRowSpacing = 115.0f;
+
 	// Floor panels in the room corners (walkway, outside the fence line), on a dark pad.
 	constexpr float PanelHeightAboveFloor = 175.0f;
 	constexpr float PanelLineSpacing = 105.0f;
@@ -202,6 +213,7 @@ ARaceGameMode::ARaceGameMode()
 	PrimaryActorTick.bCanEverTick = true;
 
 	PlayerControllerClass = ARacePlayerController::StaticClass();
+	HUDClass = ARaceHUD::StaticClass();
 	DefaultPawnClass = nullptr;
 
 	// Every road vehicle in the Fab car pack (the pack's aeroplane is left out). Each race picks four at random.
@@ -232,6 +244,8 @@ void ARaceGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Before the cars spawn, so they start with this machine's saved menu settings.
+	SettingsMenu.Initialise();
 	EnsureCars();
 	SpawnRaceProps();
 
@@ -390,6 +404,28 @@ void ARaceGameMode::SpawnRaceProps()
 	}
 
 	Celebration = GetWorld()->SpawnActor<ARaceCelebration>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+
+	// Settings menu on the front and back walls, in front of the leaderboard boards; hidden until opened.
+	MenuDisplay = GetWorld()->SpawnActor<ARaceDisplay>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	if (MenuDisplay)
+	{
+		const float HintHeight = MenuTitleHeight - (FRaceSettingsMenu::VisibleRows + 1) * MenuRowSpacing - 60.0f;
+		const float BoardTop = MenuTitleHeight + 220.0f; // high enough to cover the start-light board behind it
+		const float BoardBottom = HintHeight - 80.0f;
+		for (const float Side : { 1.0f, -1.0f })
+		{
+			const FVector Facing(0.0f, -Side, 0.0f);
+			const float Y = Side * (WallDisplayDistance - MenuWallInset);
+			MenuDisplay->AddWallBacking(FVector(0.0f, Y, (BoardTop + BoardBottom) * 0.5f), Facing, 3300.0f, BoardTop - BoardBottom);
+			MenuLines.Add(MenuDisplay->AddWallLine(FVector(0.0f, Y, MenuTitleHeight), Facing, 150.0f));
+			for (int32 Row = 0; Row < FRaceSettingsMenu::VisibleRows; ++Row)
+			{
+				MenuLines.Add(MenuDisplay->AddWallLine(FVector(0.0f, Y, MenuTitleHeight - (Row + 1) * MenuRowSpacing - 30.0f), Facing, 100.0f));
+			}
+			MenuLines.Add(MenuDisplay->AddWallLine(FVector(0.0f, Y, HintHeight), Facing, 75.0f));
+		}
+		MenuDisplay->SetActorHiddenInGame(true);
+	}
 }
 
 float ARaceGameMode::Now() const
@@ -434,6 +470,7 @@ void ARaceGameMode::Tick(float DeltaSeconds)
 	UpdateAudioRecording(DeltaSeconds);
 	UpdateSpeakerTest(DeltaSeconds);
 	UpdateCaptures(DeltaSeconds);
+	UpdateMenuTest(DeltaSeconds);
 
 	if (!bIglooReported && CVarRaceIglooCameraReport.GetValueOnGameThread() > 0)
 	{
@@ -1372,4 +1409,130 @@ AActor* ARaceGameMode::GetTrackCamera()
 	}
 	TrackCamera = Camera;
 	return TrackCamera;
+}
+
+void ARaceGameMode::ToggleSettingsMenu(int32 SlotIndex)
+{
+	if (SettingsMenu.IsOpen())
+	{
+		if (SettingsMenu.GetOwnerSlot() != SlotIndex)
+		{
+			return; // someone else is using it
+		}
+		SettingsMenu.Close();
+	}
+	else
+	{
+		SettingsMenu.Open(SlotIndex);
+		UE_LOG(LogRace, Log, TEXT("race.Menu opened by player %d"), SlotIndex + 1);
+	}
+	RefreshSettingsMenu();
+}
+
+void ARaceGameMode::SettingsMenuInput(int32 SlotIndex, int32 Rows, int32 Steps, bool bConfirm)
+{
+	if (!SettingsMenu.IsOpen() || SettingsMenu.GetOwnerSlot() != SlotIndex)
+	{
+		return;
+	}
+	const FRaceSettingsMenu::FNavigateResult Result = SettingsMenu.Navigate(Rows, Steps, bConfirm);
+	if (Result.bValuesChanged)
+	{
+		ApplySettingsToCars();
+	}
+	switch (Result.Action)
+	{
+	case ERaceMenuAction::RestartRace:
+		SettingsMenu.Close();
+		UE_LOG(LogRace, Log, TEXT("race.Menu restart race"));
+		EnterPhase(ERacePhase::GetReady);
+		break;
+	case ERaceMenuAction::Close:
+		SettingsMenu.Close();
+		break;
+	default:
+		break;
+	}
+	RefreshSettingsMenu();
+	RefreshDisplays();
+}
+
+void ARaceGameMode::GetSettingsMenuText(FString& OutTitle, TArray<FString>& OutRows, int32& OutSelectedRow, FString& OutHint) const
+{
+	SettingsMenu.GetText(OutTitle, OutRows, OutSelectedRow, OutHint);
+}
+
+void ARaceGameMode::RefreshSettingsMenu()
+{
+	if (!MenuDisplay)
+	{
+		return;
+	}
+	const bool bOpen = SettingsMenu.IsOpen();
+	MenuDisplay->SetActorHiddenInGame(!bOpen);
+	if (!bOpen)
+	{
+		return;
+	}
+
+	FString Title;
+	FString Hint;
+	TArray<FString> Rows;
+	int32 SelectedRow = INDEX_NONE;
+	SettingsMenu.GetText(Title, Rows, SelectedRow, Hint);
+	const int32 MenuOwner = SettingsMenu.GetOwnerSlot();
+
+	const int32 LinesPerWall = FRaceSettingsMenu::VisibleRows + 2;
+	for (int32 Base = 0; Base + LinesPerWall <= MenuLines.Num(); Base += LinesPerWall)
+	{
+		MenuDisplay->SetLine(MenuLines[Base], FString::Printf(TEXT("PLAYER %d:  %s"), MenuOwner + 1, *Title), SlotColor(MenuOwner));
+		for (int32 Row = 0; Row < FRaceSettingsMenu::VisibleRows; ++Row)
+		{
+			MenuDisplay->SetLine(MenuLines[Base + 1 + Row], Rows.IsValidIndex(Row) ? Rows[Row] : FString(),
+				Row == SelectedRow ? FColor(255, 210, 0) : FColor(225, 225, 225));
+		}
+		MenuDisplay->SetLine(MenuLines[Base + LinesPerWall - 1], Hint, FColor(150, 150, 150));
+	}
+}
+
+void ARaceGameMode::ApplySettingsToCars()
+{
+	const float EngineVolume = GetDefault<URaceInputSettings>()->EngineVolume;
+	for (const TObjectPtr<ARaceCarPawn>& Car : Cars)
+	{
+		SettingsMenu.ApplyCarValues(Car);
+		if (Car->EngineSound)
+		{
+			Car->EngineSound->SetVolumeMultiplier(EngineVolume);
+		}
+	}
+}
+
+void ARaceGameMode::UpdateMenuTest(float DeltaSeconds)
+{
+	if (MenuTestCloseTimer > 0.0f)
+	{
+		MenuTestCloseTimer -= DeltaSeconds;
+		if (MenuTestCloseTimer <= 0.0f && SettingsMenu.IsOpen())
+		{
+			ToggleSettingsMenu(SettingsMenu.GetOwnerSlot());
+		}
+		return;
+	}
+
+	// "+" separators, because -ExecCmds splits commands on commas.
+	TArray<FString> Parts;
+	CVarRaceMenuTest.GetValueOnGameThread().Replace(TEXT("+"), TEXT(" ")).ParseIntoArrayWS(Parts);
+	if (Parts.Num() < 3 || CaptureClock < FCString::Atof(*Parts[0]))
+	{
+		return;
+	}
+	CVarRaceMenuTest->Set(TEXT(""), ECVF_SetByConsole);
+	if (!SettingsMenu.IsOpen())
+	{
+		ToggleSettingsMenu(0);
+	}
+	SettingsMenuInput(0, FCString::Atoi(*Parts[1]), 0, false);
+	SettingsMenuInput(0, 0, FCString::Atoi(*Parts[2]), false);
+	MenuTestCloseTimer = 4.0f;
 }

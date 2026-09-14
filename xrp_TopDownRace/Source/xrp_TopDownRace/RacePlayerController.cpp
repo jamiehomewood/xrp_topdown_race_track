@@ -27,7 +27,7 @@ namespace
 			EKeys::Gamepad_FaceButton_Left, EKeys::Gamepad_FaceButton_Top,
 			EKeys::Gamepad_LeftShoulder, EKeys::Gamepad_RightShoulder,
 			EKeys::Gamepad_LeftTrigger, EKeys::Gamepad_RightTrigger,
-			EKeys::Gamepad_Special_Left, EKeys::Gamepad_Special_Right,
+			EKeys::Gamepad_Special_Right, // (the View / Back button opens the settings menu instead)
 			EKeys::Gamepad_DPad_Up, EKeys::Gamepad_DPad_Down,
 			EKeys::Gamepad_DPad_Left, EKeys::Gamepad_DPad_Right,
 			EKeys::Gamepad_LeftThumbstick, EKeys::Gamepad_RightThumbstick,
@@ -91,6 +91,40 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 	}
 
 	const URaceInputSettings* Settings = GetDefault<URaceInputSettings>();
+
+	// Settings menu: Tab (keyboard, player 1) or a controller's View / Back button opens it for that player. While
+	// it is open, that player's input drives the menu and their car gets none.
+	bool bMenuToggle = Settings->bKeyboardInputEnabled && Slot == 0 && IsInputKeyDown(EKeys::Tab);
+	bMenuToggle |= Settings->bGamepadInputEnabled && IsInputKeyDown(EKeys::Gamepad_Special_Left);
+	if (bMenuToggle && !bMenuToggleHeld)
+	{
+		const bool bWasOpen = GameMode->IsSettingsMenuOpen();
+		GameMode->ToggleSettingsMenu(Slot);
+		if (!bWasOpen && GameMode->IsSettingsMenuOpen())
+		{
+			// Buttons already held when the menu opens don't count until released.
+			bMenuConfirmHeld = true;
+			bMenuBackHeld = true;
+			for (FRaceMenuKeyRepeat* Key : { &MenuUp, &MenuDown, &MenuLeft, &MenuRight })
+			{
+				Key->bHeld = true;
+				Key->Timer = 0.35f;
+			}
+		}
+	}
+	bMenuToggleHeld = bMenuToggle;
+	if (GameMode->IsSettingsMenuOpen() && GameMode->GetSettingsMenuOwner() == Slot)
+	{
+		UpdateSettingsMenuInput(GameMode, Slot, DeltaTime);
+		if (Car->IsPlayerControlled())
+		{
+			Car->SetDriveInput(0.0f, 0.0f, 0.0f, false);
+		}
+		IdleTime = 0.0f;
+		bJoinButtonHeld = true; // a button still held as the menu closes mustn't count as a join press
+		return;
+	}
+
 	float Throttle = 0.0f;
 	float Brake = 0.0f;
 	float Steer = 0.0f;
@@ -237,4 +271,37 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 	}
 
 	Car->SetDriveInput(Throttle, Brake, Steer, bHandbrake);
+}
+
+void ARacePlayerController::UpdateSettingsMenuInput(ARaceGameMode* GameMode, int32 Slot, float DeltaTime)
+{
+	const URaceInputSettings* Settings = GetDefault<URaceInputSettings>();
+	const bool bKeyboard = Settings->bKeyboardInputEnabled && Slot == 0;
+	const bool bPad = Settings->bGamepadInputEnabled;
+	auto Down = [this](bool bEnabled, const FKey& Key) { return bEnabled && IsInputKeyDown(Key); };
+	const float StickX = bPad ? GetInputAnalogKeyState(EKeys::Gamepad_LeftX) : 0.0f;
+	const float StickY = bPad ? GetInputAnalogKeyState(EKeys::Gamepad_LeftY) : 0.0f;
+
+	const bool bUp = Down(bKeyboard, EKeys::Up) || Down(bKeyboard, EKeys::W) || Down(bPad, EKeys::Gamepad_DPad_Up) || StickY > 0.6f;
+	const bool bDown = Down(bKeyboard, EKeys::Down) || Down(bKeyboard, EKeys::S) || Down(bPad, EKeys::Gamepad_DPad_Down) || StickY < -0.6f;
+	const bool bLeft = Down(bKeyboard, EKeys::Left) || Down(bKeyboard, EKeys::A) || Down(bPad, EKeys::Gamepad_DPad_Left) || StickX < -0.6f;
+	const bool bRight = Down(bKeyboard, EKeys::Right) || Down(bKeyboard, EKeys::D) || Down(bPad, EKeys::Gamepad_DPad_Right) || StickX > 0.6f;
+	const bool bConfirm = Down(bKeyboard, EKeys::Enter) || Down(bKeyboard, EKeys::SpaceBar) || Down(bPad, EKeys::Gamepad_FaceButton_Bottom);
+	const bool bBack = Down(bKeyboard, EKeys::Escape) || Down(bKeyboard, EKeys::BackSpace) || Down(bPad, EKeys::Gamepad_FaceButton_Right);
+
+	const int32 Rows = (MenuDown.Update(bDown, DeltaTime) ? 1 : 0) - (MenuUp.Update(bUp, DeltaTime) ? 1 : 0);
+	const int32 Steps = (MenuRight.Update(bRight, DeltaTime) ? 1 : 0) - (MenuLeft.Update(bLeft, DeltaTime) ? 1 : 0);
+	const bool bConfirmPressed = bConfirm && !bMenuConfirmHeld;
+	const bool bBackPressed = bBack && !bMenuBackHeld;
+	bMenuConfirmHeld = bConfirm;
+	bMenuBackHeld = bBack;
+
+	if (bBackPressed)
+	{
+		GameMode->ToggleSettingsMenu(Slot);
+	}
+	else if (Rows != 0 || Steps != 0 || bConfirmPressed)
+	{
+		GameMode->SettingsMenuInput(Slot, Rows, Steps, bConfirmPressed);
+	}
 }

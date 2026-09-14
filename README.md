@@ -61,6 +61,19 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   players can catch up. Raise the pace values if the CPUs get too easy.
 - Project Settings › Game › Race Settings: laps, slipstream, computer drivers, input toggles, idle release, audio, performance.
 
+### Settings menu (in game)
+
+- **Tab** on the keyboard, or the **View / Back** button on a controller, opens the menu for that player; the same
+  button (or B / Esc) closes it. It shows on boards on the front and back walls in the room and on the desktop.
+- Up/Down (stick, D-pad, arrows, W/S) picks a row, Left/Right changes it (hold to repeat), A / Enter runs an action.
+  While the menu is open that player's car gets no input; the other cars keep racing.
+- Rows: laps, slipstream, CPU pace / mistakes / spins / easing off, top speed, acceleration, steering, grip,
+  handbrake grip, wall and car bounce, engine and beep volume, idle time before a player's car goes back to the CPU,
+  then RESTART RACE, RESET ALL TO DEFAULTS and CLOSE. Changes apply straight away (CPU pace from the next race).
+- Changes are saved when the menu closes, per machine, to `Saved/RaceSettings.ini` (only values that differ from
+  `Config/DefaultGame.ini`), so the repository's defaults are never touched. Delete that file or use RESET ALL TO
+  DEFAULTS to go back to the project defaults. Settings changed there override `-ini:` command-line overrides.
+
 ### Test aids (console / `-ExecCmds`)
 
 - `race.AutoDrive 1..4` with `race.AutoDriveCars N`: players take cars and drive by themselves — 1 straight,
@@ -68,6 +81,8 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
 - `race.DraftEnabled 0/1` overrides the slipstream setting; `race.CaptureAt 8,40` saves the Igloo floor/wall
   camera images to `Saved/RaceCaptures` at those times (inside `-ExecCmds`, which splits on commas, write `8+40`).
 - Quick finish test: `-ini:Game:[/Script/xrp_TopDownRace.RaceInputSettings]:RaceLaps=1` gives one-lap races.
+- `race.MenuTest 8+6+1`: 8 s in, player 1 opens the settings menu, moves down 6 rows, changes it one step and
+  closes (saves) 4 s later.
 
 ## Performance
 

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
+#include "RaceSettingsMenu.h"
 #include "RaceTrackPath.h"
 #include "RaceGameMode.generated.h"
 
@@ -100,6 +101,17 @@ public:
 
 	const FRaceTrackPath& GetTrackPath() const { return TrackPath; }
 
+	/** Opens the settings menu for this player (Tab / controller View button), or closes it if it is theirs. */
+	void ToggleSettingsMenu(int32 SlotIndex);
+	bool IsSettingsMenuOpen() const { return SettingsMenu.IsOpen(); }
+	int32 GetSettingsMenuOwner() const { return SettingsMenu.GetOwnerSlot(); }
+
+	/** Menu navigation from the player who opened it: move the selection, change the value, or confirm. */
+	void SettingsMenuInput(int32 SlotIndex, int32 Rows, int32 Steps, bool bConfirm);
+
+	/** The menu text currently shown (also drawn on the desktop by ARaceHUD). */
+	void GetSettingsMenuText(FString& OutTitle, TArray<FString>& OutRows, int32& OutSelectedRow, FString& OutHint) const;
+
 	UPROPERTY(EditAnywhere, Category = "Race")
 	int32 MaxPlayers = 4;
 
@@ -160,6 +172,19 @@ private:
 	/** Start-light beep from every speaker. */
 	void PlaySignal(float Frequency, float Seconds);
 
+	/** Shows or hides the menu boards and updates their text. */
+	void RefreshSettingsMenu();
+
+	/** Pushes menu changes onto the cars already on track (handling values, engine volume). */
+	void ApplySettingsToCars();
+
+	/** race.MenuTest: open the menu, change a row, close it. */
+	void UpdateMenuTest(float DeltaSeconds);
+
+	FRaceSettingsMenu SettingsMenu;
+	TArray<int32> MenuLines;    // per wall: title, VisibleRows rows, hint
+	float MenuTestCloseTimer = 0.0f;
+
 	FString AudioDeviceName;
 	int32 AudioChannelCount = 0;
 	int32 SpeakerTestChannel = INDEX_NONE;
@@ -186,6 +211,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<ARaceCelebration> Celebration;
+
+	/** Settings menu boards on the front and back walls (hidden while the menu is closed). */
+	UPROPERTY(Transient)
+	TObjectPtr<ARaceDisplay> MenuDisplay;
 
 	TArray<int32> PanelLines;   // PanelLinesPerSlot floor lines per player slot
 	TArray<int32> WallLines;    // per wall: banner + one row per car
