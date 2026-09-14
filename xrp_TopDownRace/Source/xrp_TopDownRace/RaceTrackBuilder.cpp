@@ -8,6 +8,7 @@
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Math/RandomStream.h"
 #include "ProceduralMeshComponent.h"
@@ -35,50 +36,35 @@ namespace
 	const FName LevelTrackTag(TEXT("TrackGen"));
 	const FName LevelSceneryTag(TEXT("TrackGenScenery"));
 
-	// Scenery, as in Tools/TrackGen/build_scenery.py: only low props on the floor so nothing hides the cars.
-	const TCHAR* NatureFolder = TEXT("/Game/LowPolyNatureLite/Assets/Models/");
-	const TCHAR* FenceFolder = TEXT("/Game/Fab/Low_Poly_Meadow_Barrier_Bundle__Fences___Walls/");
 	constexpr float FenceOffset = 90.0f;       // fence line beyond the outer kerb wall
-	constexpr float FencePieceLength = 150.0f;
 	constexpr float FloorPropMargin = 60.0f;   // from the room edge
 	constexpr float FloorPropTrackGap = 130.0f;
-	constexpr int32 FloorPropCount = 190;
 
-	struct FPropChoice
+	// Streams: a strip of the pack's river plane across open grass.
+	constexpr float StreamTrackGap = 120.0f;
+	constexpr float StreamLengthMin = 500.0f;
+	constexpr float StreamLengthMax = 1300.0f;
+	constexpr float StreamWidthMin = 110.0f;
+	constexpr float StreamWidthMax = 170.0f;
+
+	// Backdrop beyond the walls (the wall projection), as build_scenery.build_backdrop.
+	constexpr float BackdropInnerPad = 250.0f;
+	constexpr float BackdropOuterPad = 4200.0f;
+	constexpr float LakeGapToWall = 400.0f;
+	constexpr float WaterRoughness = 0.6f;  // shinier water mirrors the bright sky at the low angle the walls see it from
+
+	// Ground plane for themes that don't use the level's grass tile: 50 km across, well past the mountain ring.
+	const TCHAR* PlaneMeshPath = TEXT("/Engine/BasicShapes/Plane.Plane");
+	const TCHAR* GroundMaterialPath = TEXT("/Game/LPRiverForest/Materials/Common/MI_LowPoly.MI_LowPoly");
+	constexpr float GroundSize = 5000000.0f;
+
+	bool IsLevelFloorScenery(const AStaticMeshActor* Actor, bool& bOutGroundTile)
 	{
-		const TCHAR* Name;
-		float Weight;
-		float Radius; // footprint in UU
-	};
-
-	const FPropChoice FloorProps[] = {
-		{ TEXT("SM_Bush_Simple"), 5, 90 }, { TEXT("SM_Bush_Berries_Red"), 2, 110 }, { TEXT("SM_Bush_Berries_blue"), 2, 110 },
-		{ TEXT("SM_Bush_Berries_Empty"), 2, 110 }, { TEXT("SM_Grass_Array01"), 5, 85 }, { TEXT("SM_Grass01"), 6, 45 },
-		{ TEXT("SM_Grass03"), 4, 30 }, { TEXT("SM_Plant02"), 3, 85 }, { TEXT("SM_Flower02_Orange"), 3, 40 },
-		{ TEXT("SM_Flower02_Pink"), 3, 40 }, { TEXT("SM_Flower02_Yellow"), 3, 40 }, { TEXT("SM_Hat_Mushroom_red"), 1, 40 },
-		{ TEXT("SM_Mushrooom01_brown"), 1, 35 }, { TEXT("SM_Stone02"), 3, 50 }, { TEXT("SM_Stones02"), 2, 110 },
-		{ TEXT("SM_Rock02"), 2, 120 },
-	};
-
-	// Bigger features, placed first wherever they fit.
-	const FPropChoice FloorFeatures[] = {
-		{ TEXT("SM_Tent_Blue"), 1, 230 }, { TEXT("SM_Tent_Red"), 1, 230 }, { TEXT("SM_Log"), 1, 140 },
-		{ TEXT("SM_Log"), 1, 140 }, { TEXT("SM_Stones02"), 1, 140 }, { TEXT("SM_Branch01"), 1, 140 },
-	};
-
-	const TCHAR* FencePieces[] = {
-		TEXT("EA03_Fence_Plank_01a"), TEXT("EA03_Fence_Plank_01b"), TEXT("EA03_Fence_Plank_01c"),
-		TEXT("EA03_Fence_Plank_01d"), TEXT("EA03_Fence_Plank_01e"),
-	};
-
-	FString NatureMesh(const TCHAR* Name)
-	{
-		return FString::Printf(TEXT("%s%s.%s"), NatureFolder, Name, Name);
-	}
-
-	FString FenceMesh(const TCHAR* Name)
-	{
-		return FString::Printf(TEXT("%s%s/StaticMeshes/%s.%s"), FenceFolder, Name, Name, Name);
+		const UStaticMeshComponent* Component = Actor->GetStaticMeshComponent();
+		const UStaticMesh* Mesh = Component ? Component->GetStaticMesh() : nullptr;
+		bOutGroundTile = Mesh && Mesh->GetName() == TEXT("SM_Tile_Grass");
+		const FVector Location = Actor->GetActorLocation();
+		return !bOutGroundTile && FMath::Abs(Location.X) < RoomHalfX + 100.0f && FMath::Abs(Location.Y) < RoomHalfY + 100.0f;
 	}
 
 	/** Flat-shaded polygons for one procedural mesh section. */
@@ -192,6 +178,41 @@ namespace
 			UE_LOG(LogRaceTrack, Warning, TEXT("race.Track missing material %s"), MaterialPath);
 		}
 	}
+
+	const FRaceProp* PickWeighted(const TArray<FRaceProp>& Choices, FRandomStream& Random)
+	{
+		if (Choices.Num() == 0)
+		{
+			return nullptr;
+		}
+		float Total = 0.0f;
+		for (const FRaceProp& Choice : Choices)
+		{
+			Total += Choice.Weight;
+		}
+		float Pick = Random.FRandRange(0.0f, Total);
+		for (const FRaceProp& Choice : Choices)
+		{
+			Pick -= Choice.Weight;
+			if (Pick <= 0.0f)
+			{
+				return &Choice;
+			}
+		}
+		return &Choices.Last();
+	}
+
+	bool Overlaps(const TArray<TPair<FVector2D, float>>& Taken, const FVector2D& Point, float Radius)
+	{
+		for (const TPair<FVector2D, float>& Other : Taken)
+		{
+			if (FVector2D::Distance(Point, Other.Key) < Radius + Other.Value + 20.0f)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
 }
 
 ARaceTrackBuilder::ARaceTrackBuilder()
@@ -207,13 +228,14 @@ ARaceTrackBuilder::ARaceTrackBuilder()
 	TrackMesh->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 }
 
-void ARaceTrackBuilder::Build(const FRaceTrackPath& Path, int32 ScenerySeed)
+void ARaceTrackBuilder::Build(const FRaceTrackPath& Path, int32 ScenerySeed, ERaceThemeKind Theme, ERaceSeasonKind Season)
 {
 	const TArray<FVector2D>& Centre = Path.GetPoints();
 	if (Centre.Num() < 3)
 	{
 		return;
 	}
+
 	// Centreline with extra points where the road width starts or stops changing, and the half width at each point.
 	TArray<FVector2D> Profile;
 	TArray<double> HalfWidths;
@@ -272,6 +294,7 @@ void ARaceTrackBuilder::Build(const FRaceTrackPath& Path, int32 ScenerySeed)
 	CreateSection(TrackMesh, WallSection, Walls, true, WallMaterialPath);
 	CreateSection(TrackMesh, LineSection, Line, false, LineMaterialPath);
 
+	// Scenery for the theme and season.
 	for (UStaticMeshComponent* Prop : Props)
 	{
 		if (Prop)
@@ -280,17 +303,59 @@ void ARaceTrackBuilder::Build(const FRaceTrackPath& Path, int32 ScenerySeed)
 		}
 	}
 	Props.Reset();
+	Content = &RaceTheme::Get(Theme);
+	CurrentSeason = Season;
+	SetLevelBackdropVisible(GetWorld(), Content->bUsesLevelBackdrop);
+
 	FRandomStream Random(ScenerySeed);
+	FTaken FloorTaken;
+	if (Content->bBuildGround)
+	{
+		BuildGround();
+	}
 	BuildFences(Path, Random);
 	BuildNarrowingScenery(Path, Random);
-	BuildFloorScenery(Path, Random);
+	BuildStreams(Path, Random, FloorTaken);
+	BuildFloorScenery(Path, Random, FloorTaken);
+	BuildBackdrop(Random);
 
-	UE_LOG(LogRaceTrack, Log, TEXT("race.Track built: %d road / %d wall triangles, %d scenery pieces"),
-		Road.Triangles.Num() / 3, Walls.Triangles.Num() / 3, Props.Num());
+	UE_LOG(LogRaceTrack, Log, TEXT("race.Track built (%s, %s): %d road / %d wall triangles, %d scenery pieces"),
+		RaceTheme::Name(Theme), RaceTheme::Name(Season), Road.Triangles.Num() / 3, Walls.Triangles.Num() / 3, Props.Num());
+}
+
+UMaterialInstanceDynamic* ARaceTrackBuilder::MakeFlatMaterial(const FLinearColor& Color, float Roughness)
+{
+	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, GroundMaterialPath);
+	if (!Base)
+	{
+		return nullptr;
+	}
+	// The pack's low-poly material mixes its colours by the mesh's vertex colours (Paint) and height masks, so set
+	// them all: plain engine meshes and the water planes then come out in exactly this colour.
+	UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(Base, this);
+	for (const TCHAR* Parameter : { TEXT("BaseColor"), TEXT("Highlight"), TEXT("Paint") })
+	{
+		Material->SetVectorParameterValue(Parameter, Color);
+	}
+	Material->SetVectorParameterValue(TEXT("AO"), Color * 0.85f);
+	Material->SetScalarParameterValue(TEXT("Roughness"), Roughness);
+	return Material;
+}
+
+void ARaceTrackBuilder::BuildGround()
+{
+	if (UStaticMeshComponent* Ground = AddProp(PlaneMeshPath, FVector::ZeroVector, FRotator::ZeroRotator, FVector(GroundSize / 100.0f), false))
+	{
+		Ground->SetMaterial(0, MakeFlatMaterial(RaceTheme::GroundColor(CurrentSeason), 1.0f));
+	}
 }
 
 void ARaceTrackBuilder::BuildFences(const FRaceTrackPath& Path, FRandomStream& Random)
 {
+	if (Content->FencePieces.Num() == 0)
+	{
+		return;
+	}
 	const TArray<FVector2D>& Centre = Path.GetPoints();
 	const float Clear = FRaceTrackPath::TrackWidth * 0.5f + FRaceTrackPath::WallWidth;
 
@@ -299,7 +364,8 @@ void ARaceTrackBuilder::BuildFences(const FRaceTrackPath& Path, FRandomStream& R
 	const TArray<FVector2D> Loop = OffsetLoop(Centre, bLeftIsOutside ? Clear + FenceOffset : -(Clear + FenceOffset));
 
 	// Walk the loop, a piece every FencePieceLength (skipping any that would sit too close to another stretch of road).
-	double NextAt = FencePieceLength * 0.5;
+	const double PieceLength = Content->FencePieceLength;
+	double NextAt = PieceLength * 0.5;
 	double Walked = 0.0;
 	for (int32 Index = 0; Index < Loop.Num(); ++Index)
 	{
@@ -312,30 +378,59 @@ void ARaceTrackBuilder::BuildFences(const FRaceTrackPath& Path, FRandomStream& R
 			const FVector2D Point = A + (B - A) * ((NextAt - Walked) / Length);
 			if (Path.GetDistanceToCentreline(Point) > Clear + 40.0f)
 			{
-				AddProp(FenceMesh(FencePieces[Random.RandRange(0, UE_ARRAY_COUNT(FencePieces) - 1)]), Point, Yaw, 1.0f, true);
+				const FString& Piece = Content->FencePieces[Random.RandRange(0, Content->FencePieces.Num() - 1)];
+				AddProp(Piece, FVector(Point, 0.0), FRotator(0.0f, Yaw, 0.0f), FVector::OneVector, true);
 			}
-			NextAt += FencePieceLength;
+			NextAt += PieceLength;
 		}
 		Walked += Length;
 	}
 
 	// Posts either side of the start line.
-	FVector2D Direction;
-	const FVector2D StartLine = Path.GetPointAtDistance(Path.GetStartLineDistance(), &Direction);
-	const FVector2D Across(-Direction.Y, Direction.X);
-	for (const float Side : { -1.0f, 1.0f })
+	if (!Content->StartPost.IsEmpty())
 	{
-		AddProp(FenceMesh(TEXT("EA03_Wooden_Pin_01d")), StartLine + Across * Side * (Clear + 60.0f), 0.0f, 1.0f, true);
+		FVector2D Direction;
+		const FVector2D StartLine = Path.GetPointAtDistance(Path.GetStartLineDistance(), &Direction);
+		const FVector2D Across(-Direction.Y, Direction.X);
+		for (const float Side : { -1.0f, 1.0f })
+		{
+			AddProp(Content->StartPost, FVector(StartLine + Across * Side * (Clear + 60.0f), 0.0), FRotator::ZeroRotator, FVector::OneVector, true);
+		}
 	}
 }
 
 void ARaceTrackBuilder::BuildNarrowingScenery(const FRaceTrackPath& Path, FRandomStream& Random)
 {
-	// Rocks and bushes in the grass beside a narrowed kerb, so the squeeze looks like it's there for a reason.
 	const float FullHalfWidth = FRaceTrackPath::TrackWidth * 0.5f;
+	UStaticMesh* WallRock = Content->NarrowingWallRock.IsEmpty() ? nullptr : LoadMesh(Content->NarrowingWallRock);
 	for (const FRaceTrackPath::FNarrowingSpan& Span : Path.GetNarrowingSpans())
 	{
 		const float Gap = FullHalfWidth - Span.HalfWidth; // between the narrow kerb and where the full-width kerb would be
+		const float SideOffset = Span.HalfWidth + FRaceTrackPath::WallWidth + Gap * 0.5f;
+
+		if (WallRock)
+		{
+			// Long rocks lined up along both narrowed kerbs, like a rocky gap (only along the narrow part, not the tapers).
+			const FVector Size = WallRock->GetBoundingBox().GetSize();
+			const float Length = Span.HalfLength * 2.0f;
+			const int32 Count = FMath::Max(1, FMath::RoundToInt(Length / (Size.X * 0.75f)));
+			const float PieceLength = Length / Count;
+			const float Depth = FMath::Max(Gap - 30.0f, 60.0f);
+			for (const float Side : { -1.0f, 1.0f })
+			{
+				for (int32 Piece = 0; Piece < Count; ++Piece)
+				{
+					FVector2D Direction;
+					const FVector2D Point = Path.GetPointAtDistance(Span.CentreDistance - Span.HalfLength + PieceLength * (Piece + 0.5f), &Direction);
+					const FVector2D Across(-Direction.Y, Direction.X);
+					const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X)) + (Side < 0.0f ? 180.0f : 0.0f) + Random.FRandRange(-6.0f, 6.0f);
+					const FVector Scale(PieceLength * 1.15f / Size.X, Depth / Size.Y, Random.FRandRange(0.6f, 0.85f));
+					AddProp(Content->NarrowingWallRock, FVector(Point + Across * Side * SideOffset, 0.0), FRotator(0.0f, Yaw, 0.0f), Scale, true);
+				}
+			}
+			continue;
+		}
+
 		for (float Along = -Span.HalfLength; Along <= Span.HalfLength + 1.0f; Along += 170.0f)
 		{
 			FVector2D Direction;
@@ -343,70 +438,117 @@ void ARaceTrackBuilder::BuildNarrowingScenery(const FRaceTrackPath& Path, FRando
 			const FVector2D Across(-Direction.Y, Direction.X);
 			for (const float Side : { -1.0f, 1.0f })
 			{
-				const bool bRock = Random.FRand() < 0.6f;
-				const FVector2D Location = Point + Across * Side * (Span.HalfWidth + FRaceTrackPath::WallWidth + Gap * 0.5f);
-				AddProp(NatureMesh(bRock ? TEXT("SM_Rock02") : TEXT("SM_Bush_Simple")), Location, Random.FRandRange(0.0f, 360.0f),
-					bRock ? Random.FRandRange(0.45f, 0.65f) : Random.FRandRange(0.8f, 1.05f), true);
+				if (const FRaceProp* Choice = PickWeighted(Content->NarrowingProps, Random))
+				{
+					AddProp(Choice->Mesh, FVector(Point + Across * Side * SideOffset, 0.0), FRotator(0.0f, Random.FRandRange(0.0f, 360.0f), 0.0f),
+						FVector(Random.FRandRange(Choice->ScaleMin, Choice->ScaleMax)), Choice->bCastShadow);
+				}
 			}
 		}
 	}
 }
 
-void ARaceTrackBuilder::BuildFloorScenery(const FRaceTrackPath& Path, FRandomStream& Random)
+void ARaceTrackBuilder::BuildStreams(const FRaceTrackPath& Path, FRandomStream& Random, FTaken& Taken)
+{
+	if (Content->MaxStreams <= 0 || Content->StreamMesh.IsEmpty())
+	{
+		return;
+	}
+	const float Clear = FRaceTrackPath::TrackWidth * 0.5f + FRaceTrackPath::WallWidth + StreamTrackGap;
+	int32 Placed = 0;
+	for (int32 Try = 0; Try < 200 && Placed < Content->MaxStreams; ++Try)
+	{
+		const float Length = Random.FRandRange(StreamLengthMin, StreamLengthMax);
+		const float Width = Random.FRandRange(StreamWidthMin, StreamWidthMax);
+		const FVector2D Middle(Random.FRandRange(-RoomHalfX + 300.0f, RoomHalfX - 300.0f), Random.FRandRange(-RoomHalfY + 300.0f, RoomHalfY - 300.0f));
+		const float Yaw = Random.FRandRange(0.0f, 180.0f);
+		const FVector2D Along(FMath::Cos(FMath::DegreesToRadians(Yaw)), FMath::Sin(FMath::DegreesToRadians(Yaw)));
+		const FVector2D Across(-Along.Y, Along.X);
+
+		// Open grass all the way along: inside the room, clear of the road and of anything placed already.
+		bool bClear = true;
+		for (float T = -Length * 0.5f; T <= Length * 0.5f + 1.0f && bClear; T += 80.0f)
+		{
+			const FVector2D Point = Middle + Along * T;
+			bClear = FMath::Abs(Point.X) < RoomHalfX - 150.0f && FMath::Abs(Point.Y) < RoomHalfY - 150.0f &&
+				Path.GetDistanceToCentreline(Point) - Clear >= Width * 0.5f && !Overlaps(Taken, Point, Width * 0.5f + 40.0f);
+		}
+		if (!bClear)
+		{
+			continue;
+		}
+
+		if (UStaticMeshComponent* Water = AddProp(Content->StreamMesh, FVector(Middle, 1.0), FRotator(0.0f, Yaw, 0.0f), FVector(Length / 100.0f, Width / 100.0f, 1.0f), false))
+		{
+			Water->SetMaterial(0, MakeFlatMaterial(RaceTheme::WaterColor(CurrentSeason), WaterRoughness));
+		}
+		for (float T = -Length * 0.5f; T <= Length * 0.5f + 1.0f; T += 80.0f)
+		{
+			Taken.Emplace(Middle + Along * T, Width * 0.5f + 40.0f);
+		}
+
+		// Stones and grass along the banks.
+		for (float T = -Length * 0.5f; T <= Length * 0.5f; T += Random.FRandRange(90.0f, 160.0f))
+		{
+			for (const float Side : { -1.0f, 1.0f })
+			{
+				const FRaceProp* Bank = Random.FRand() < 0.6f ? PickWeighted(Content->StreamBankProps, Random) : nullptr;
+				if (Bank)
+				{
+					const FVector2D Point = Middle + Along * T + Across * Side * (Width * 0.5f + Random.FRandRange(0.0f, 25.0f));
+					AddProp(Bank->Mesh, FVector(Point, 0.0), FRotator(0.0f, Random.FRandRange(0.0f, 360.0f), 0.0f),
+						FVector(Random.FRandRange(Bank->ScaleMin, Bank->ScaleMax)), Bank->bCastShadow);
+				}
+			}
+		}
+
+		// Sometimes a line of stepping stones across.
+		if (Content->SteppingStones.Num() > 0 && Random.FRand() < 0.6f)
+		{
+			const FVector2D Crossing = Middle + Along * Random.FRandRange(-Length * 0.3f, Length * 0.3f);
+			for (const float Offset : { -0.3f, 0.0f, 0.3f })
+			{
+				const FString& Stone = Content->SteppingStones[Random.RandRange(0, Content->SteppingStones.Num() - 1)];
+				AddProp(Stone, FVector(Crossing + Across * Offset * Width, 2.0), FRotator(0.0f, Random.FRandRange(0.0f, 360.0f), 0.0f),
+					FVector(Random.FRandRange(0.45f, 0.6f)), false);
+			}
+		}
+		++Placed;
+	}
+	UE_LOG(LogRaceTrack, Log, TEXT("race.Track streams placed: %d"), Placed);
+}
+
+void ARaceTrackBuilder::BuildFloorScenery(const FRaceTrackPath& Path, FRandomStream& Random, FTaken& Taken)
 {
 	const float Clear = FRaceTrackPath::TrackWidth * 0.5f + FRaceTrackPath::WallWidth + FloorPropTrackGap;
-	TArray<TPair<FVector2D, float>> Taken;
 
-	auto TryPlace = [&](const FPropChoice& Choice, bool bRandomScale)
+	auto TryPlace = [&](const FRaceProp& Choice)
 	{
 		const FVector2D Point(Random.FRandRange(-RoomHalfX + FloorPropMargin, RoomHalfX - FloorPropMargin),
 			Random.FRandRange(-RoomHalfY + FloorPropMargin, RoomHalfY - FloorPropMargin));
-		const float Scale = bRandomScale ? Random.FRandRange(0.85f, 1.2f) : 1.0f;
+		const float Scale = Random.FRandRange(Choice.ScaleMin, Choice.ScaleMax);
 		const float Radius = Choice.Radius * Scale;
-		if (Path.GetDistanceToCentreline(Point) - Clear < Radius)
+		if (Path.GetDistanceToCentreline(Point) - Clear < Radius || Overlaps(Taken, Point, Radius))
 		{
 			return false;
 		}
-		for (const TPair<FVector2D, float>& Other : Taken)
-		{
-			if (FVector2D::Distance(Point, Other.Key) < Radius + Other.Value + 20.0f)
-			{
-				return false;
-			}
-		}
 		Taken.Emplace(Point, Radius);
-		AddProp(NatureMesh(Choice.Name), Point, Random.FRandRange(0.0f, 360.0f), Scale, Choice.Radius > 60.0f);
+		AddProp(Choice.Mesh, FVector(Point, 0.0), FRotator(0.0f, Random.FRandRange(0.0f, 360.0f), 0.0f), FVector(Scale), Choice.bCastShadow);
 		return true;
 	};
 
-	for (const FPropChoice& Feature : FloorFeatures)
+	for (const FRaceProp& Feature : Content->FloorFeatures)
 	{
-		for (int32 Try = 0; Try < 60 && !TryPlace(Feature, false); ++Try)
+		for (int32 Try = 0; Try < 60 && !TryPlace(Feature); ++Try)
 		{
 		}
 	}
-
-	float TotalWeight = 0.0f;
-	for (const FPropChoice& Choice : FloorProps)
-	{
-		TotalWeight += Choice.Weight;
-	}
-	for (int32 Piece = 0; Piece < FloorPropCount; ++Piece)
+	for (int32 Piece = 0; Piece < Content->FloorPropCount; ++Piece)
 	{
 		for (int32 Try = 0; Try < 40; ++Try)
 		{
-			float Pick = Random.FRandRange(0.0f, TotalWeight);
-			const FPropChoice* Choice = &FloorProps[UE_ARRAY_COUNT(FloorProps) - 1];
-			for (const FPropChoice& Candidate : FloorProps)
-			{
-				Pick -= Candidate.Weight;
-				if (Pick <= 0.0f)
-				{
-					Choice = &Candidate;
-					break;
-				}
-			}
-			if (TryPlace(*Choice, true))
+			const FRaceProp* Choice = PickWeighted(Content->FloorProps, Random);
+			if (!Choice || TryPlace(*Choice))
 			{
 				break;
 			}
@@ -414,35 +556,105 @@ void ARaceTrackBuilder::BuildFloorScenery(const FRaceTrackPath& Path, FRandomStr
 	}
 }
 
-void ARaceTrackBuilder::AddProp(const FString& MeshPath, const FVector2D& Location, float Yaw, float Scale, bool bCastShadow)
+void ARaceTrackBuilder::BuildBackdrop(FRandomStream& Random)
 {
-	UStaticMesh* Mesh = nullptr;
-	if (const TObjectPtr<UStaticMesh>* Found = PropMeshes.Find(MeshPath))
-	{
-		Mesh = Found->Get();
-	}
-	else
-	{
-		Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
-		if (!Mesh)
-		{
-			UE_LOG(LogRaceTrack, Warning, TEXT("race.Track missing scenery mesh %s"), *MeshPath);
-		}
-		PropMeshes.Add(MeshPath, Mesh);
-	}
-	if (!Mesh)
+	if (Content->bUsesLevelBackdrop)
 	{
 		return;
+	}
+	FTaken Taken;
+
+	// A lake just beyond one of the walls, where the wall projection shows the ground.
+	if (!Content->LakeMesh.IsEmpty())
+	{
+		if (UStaticMesh* Lake = LoadMesh(Content->LakeMesh))
+		{
+			const float Scale = Random.FRandRange(1.0f, 1.3f);
+			const float Radius = Lake->GetBoundingBox().GetSize().X * 0.5f * Scale;
+			const int32 Wall = Random.RandRange(0, 3);
+			const float Sign = (Wall % 2 == 0) ? 1.0f : -1.0f;
+			const FVector2D Location = Wall < 2
+				? FVector2D(Sign * (RoomHalfX + LakeGapToWall + Radius), Random.FRandRange(-1500.0f, 1500.0f))
+				: FVector2D(Random.FRandRange(-1200.0f, 1200.0f), Sign * (RoomHalfY + LakeGapToWall + Radius));
+			if (UStaticMeshComponent* Water = AddProp(Content->LakeMesh, FVector(Location, 1.0), FRotator(0.0f, Random.FRandRange(0.0f, 360.0f), 0.0f), FVector(Scale), false))
+			{
+				Water->SetMaterial(0, MakeFlatMaterial(RaceTheme::WaterColor(CurrentSeason), WaterRoughness));
+			}
+			Taken.Emplace(Location, Radius + 100.0f);
+		}
+	}
+
+	// Trees and rocks from just outside the walls outwards, bigger further out (as build_scenery.build_backdrop).
+	for (int32 Piece = 0; Piece < Content->BackdropCount; ++Piece)
+	{
+		for (int32 Try = 0; Try < 40; ++Try)
+		{
+			const FRaceProp* Choice = PickWeighted(Content->BackdropProps, Random);
+			if (!Choice)
+			{
+				return;
+			}
+			const FVector2D Point(Random.FRandRange(-RoomHalfX - BackdropOuterPad, RoomHalfX + BackdropOuterPad),
+				Random.FRandRange(-RoomHalfY - BackdropOuterPad, RoomHalfY + BackdropOuterPad));
+			if (FMath::Abs(Point.X) <= RoomHalfX + BackdropInnerPad && FMath::Abs(Point.Y) <= RoomHalfY + BackdropInnerPad)
+			{
+				continue;
+			}
+			const float Depth = FMath::Max3(float(FMath::Abs(Point.X)) - RoomHalfX, float(FMath::Abs(Point.Y)) - RoomHalfY, 0.0f);
+			const float Scale = (1.0f + Depth / BackdropOuterPad * 1.6f) * Random.FRandRange(0.85f, 1.2f) * Random.FRandRange(Choice->ScaleMin, Choice->ScaleMax);
+			const float Radius = Choice->Radius * Scale;
+			if (Overlaps(Taken, Point, Radius))
+			{
+				continue;
+			}
+			Taken.Emplace(Point, Radius);
+			AddProp(Choice->Mesh, FVector(Point, 0.0), FRotator(0.0f, Random.FRandRange(0.0f, 360.0f), 0.0f), FVector(Scale), Choice->bCastShadow);
+			break;
+		}
+	}
+}
+
+UStaticMesh* ARaceTrackBuilder::LoadMesh(const FString& MeshPath)
+{
+	if (const TObjectPtr<UStaticMesh>* Found = PropMeshes.Find(MeshPath))
+	{
+		return Found->Get();
+	}
+	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
+	if (!Mesh)
+	{
+		UE_LOG(LogRaceTrack, Warning, TEXT("race.Track missing scenery mesh %s"), *MeshPath);
+	}
+	PropMeshes.Add(MeshPath, Mesh);
+	return Mesh;
+}
+
+UStaticMeshComponent* ARaceTrackBuilder::AddProp(const FString& MeshPath, const FVector& Location, const FRotator& Rotation, const FVector& Scale, bool bCastShadow)
+{
+	UStaticMesh* Mesh = LoadMesh(RaceTheme::SeasonMesh(MeshPath, CurrentSeason));
+	if (!Mesh)
+	{
+		return nullptr;
 	}
 
 	UStaticMeshComponent* Prop = NewObject<UStaticMeshComponent>(this);
 	Prop->SetStaticMesh(Mesh);
 	Prop->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Prop->SetCastShadow(bCastShadow);
+	for (int32 Slot = 0; Slot < Mesh->GetStaticMaterials().Num(); ++Slot)
+	{
+		UMaterialInterface* Material = Mesh->GetMaterial(Slot);
+		UMaterialInterface* Seasonal = RaceTheme::SeasonMaterial(Material, CurrentSeason);
+		if (Seasonal != Material)
+		{
+			Prop->SetMaterial(Slot, Seasonal);
+		}
+	}
 	Prop->SetupAttachment(RootComponent);
-	Prop->SetRelativeTransform(FTransform(FRotator(0.0f, Yaw, 0.0f), FVector(Location, 0.0), FVector(Scale)));
+	Prop->SetRelativeTransform(FTransform(Rotation, Location, Scale));
 	Prop->RegisterComponent();
 	Props.Add(Prop);
+	return Prop;
 }
 
 int32 ARaceTrackBuilder::HideLevelTrack(UWorld* World)
@@ -451,12 +663,8 @@ int32 ARaceTrackBuilder::HideLevelTrack(UWorld* World)
 	for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
 	{
 		AStaticMeshActor* Actor = *It;
-		const FVector Location = Actor->GetActorLocation();
-		const UStaticMeshComponent* Component = Actor->GetStaticMeshComponent();
-		const UStaticMesh* Mesh = Component ? Component->GetStaticMesh() : nullptr;
-		// Floor scenery: tagged scenery standing on the room floor, except the big ground tile centred there.
-		const bool bFloorScenery = Actor->ActorHasTag(LevelSceneryTag) && FMath::Abs(Location.X) < RoomHalfX + 100.0f &&
-			FMath::Abs(Location.Y) < RoomHalfY + 100.0f && !(Mesh && Mesh->GetName() == TEXT("SM_Tile_Grass"));
+		bool bGroundTile = false;
+		const bool bFloorScenery = Actor->ActorHasTag(LevelSceneryTag) && IsLevelFloorScenery(Actor, bGroundTile);
 		if (Actor->ActorHasTag(LevelTrackTag) || bFloorScenery)
 		{
 			Actor->SetActorHiddenInGame(true);
@@ -465,4 +673,17 @@ int32 ARaceTrackBuilder::HideLevelTrack(UWorld* World)
 		}
 	}
 	return Hidden;
+}
+
+void ARaceTrackBuilder::SetLevelBackdropVisible(UWorld* World, bool bVisible)
+{
+	for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
+	{
+		AStaticMeshActor* Actor = *It;
+		bool bGroundTile = false;
+		if (Actor->ActorHasTag(LevelSceneryTag) && !IsLevelFloorScenery(Actor, bGroundTile))
+		{
+			Actor->SetActorHiddenInGame(!bVisible);
+		}
+	}
 }

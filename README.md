@@ -79,6 +79,15 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   bushes beside the kerb, so not every car fits through side by side. Never on corners or the start grid. CPU
   drivers keep inside the narrowed walls and lift for the squeeze (unless they're braking late).
 - Laps, positions, slipstream and the computer drivers all follow whichever track is built.
+- **Scenery themes** (`Theme`, `Season`; menu THEME / SEASON; both Random by default), chosen as each race lines up:
+  - *Countryside*: meadow props, tents and planked fences on the floor; the trees, hills and grass ground saved in
+    the level beyond the walls.
+  - *River forest* (LPRiverForest pack): bushes, flowers, rocks, logs, a sword in the stone and a few small trees on
+    the floor; one or two streams with stepping stones; the pack's wooden fence; rocky gaps at narrow sections;
+    a pine and oak forest, a lake and cliffs beyond the walls; the pack's mountains in the ring. **Seasons**: Summer,
+    Autumn (orange trees and grass) or Snow (snowy pines, white rocks and mountains, icy water) by swapping to the
+    pack's seasonal materials. Ground and water are plain coloured materials per season.
+  - The pack's demo maps (225 MB of landscape) are git-ignored; only its meshes, materials and texture are used.
 - **Mountains**: two overlapping ranges of low-poly mountains and hills all the way round (about 12 km and 21 km
   out, peaks 5–14° above eye level) hide the flat horizon line on every wall. The horizon itself stays at the Igloo
   eye height (1.7 m): lowering the cameras would make the floor projection bigger than the room.
@@ -91,7 +100,7 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
   button (or B / Esc) closes it. It shows on boards on the front and back walls in the room and on the desktop.
 - Up/Down (stick, D-pad, arrows, W/S) picks a row, Left/Right changes it (hold to repeat), A / Enter runs an action.
   While the menu is open that player's car gets no input; the other cars keep racing.
-- Rows: laps, new track each race, narrow sections, track grid, slipstream, CPU pace / mistakes / spins / easing off, top speed, acceleration, steering, grip,
+- Rows: laps, new track each race, narrow sections, track grid, theme, season, slipstream, CPU pace / mistakes / spins / easing off, top speed, acceleration, steering, grip,
   handbrake grip, wall and car bounce, engine and beep volume, idle time before a player's car goes back to the CPU,
   then RESTART RACE, RESET ALL TO DEFAULTS and CLOSE. Changes apply straight away (CPU pace from the next race).
 - Changes are saved when the menu closes, per machine, to `Saved/RaceSettings.ini` (only values that differ from

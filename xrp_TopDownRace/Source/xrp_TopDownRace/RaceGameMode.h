@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "RaceSettingsMenu.h"
+#include "RaceTheme.h"
 #include "RaceTrackGenerator.h"
 #include "RaceTrackPath.h"
 #include "RaceGameMode.generated.h"
@@ -12,6 +13,7 @@ class ARaceCarPawn;
 class ARaceCelebration;
 class ARaceDisplay;
 class ARacePlayerController;
+class ARaceMountainRing;
 class ARaceStartLights;
 class ARaceTrackBuilder;
 class USceneCaptureComponent2D;
@@ -191,6 +193,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<ARaceTrackBuilder> TrackBuilder;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ARaceMountainRing> MountainRing;
+
+	ERaceThemeKind CurrentTheme = ERaceThemeKind::Countryside;
+	ERaceSeasonKind CurrentSeason = ERaceSeasonKind::Summer;
 
 	/** Shows or hides the menu boards and updates their text. */
 	void RefreshSettingsMenu();

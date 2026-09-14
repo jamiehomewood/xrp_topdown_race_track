@@ -3,6 +3,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Math/RandomStream.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogRaceMountains, Log, All);
@@ -20,18 +21,11 @@ namespace
 		float PeakDegreesMax;
 		float WidthPerSpacing;     // mountain width / gap between neighbours (> 2 overlaps them into one ridge)
 		float AzimuthOffset;       // in units of the gap, so the ranges' valleys don't line up
-		bool bUseHills;
 	};
 
 	const FRange Ranges[] = {
-		{ 30, 12000.0f, 1200.0f, 4.5f, 8.5f, 2.4f, 0.0f, true },    // near: hills and mountains
-		{ 40, 21000.0f, 2000.0f, 9.0f, 14.0f, 2.8f, 0.5f, false },  // far: taller mountains, closes every gap
-	};
-
-	const TCHAR* MountainMesh = TEXT("/Game/LowPolyNatureLite/Assets/Models/SM_Mountain01.SM_Mountain01");
-	const TCHAR* HillMeshes[] = {
-		TEXT("/Game/LowPolyNatureLite/Assets/Models/SM_Hills01.SM_Hills01"),
-		TEXT("/Game/LowPolyNatureLite/Assets/Models/SM_Hills02.SM_Hills02"),
+		{ 30, 12000.0f, 1200.0f, 4.5f, 8.5f, 2.4f, 0.0f },    // near
+		{ 40, 21000.0f, 2000.0f, 9.0f, 14.0f, 2.8f, 0.5f },   // far: taller, closes every gap
 	};
 }
 
@@ -41,32 +35,42 @@ ARaceMountainRing::ARaceMountainRing()
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 }
 
-void ARaceMountainRing::BeginPlay()
+void ARaceMountainRing::Build(ERaceThemeKind Theme, ERaceSeasonKind Season)
 {
-	Super::BeginPlay();
-
-	UStaticMesh* Mountain = LoadObject<UStaticMesh>(nullptr, MountainMesh);
-	TArray<UStaticMesh*> Hills;
-	for (const TCHAR* Path : HillMeshes)
+	if (bBuilt && Theme == BuiltTheme && Season == BuiltSeason)
 	{
-		if (UStaticMesh* Hill = LoadObject<UStaticMesh>(nullptr, Path))
-		{
-			Hills.Add(Hill);
-		}
-	}
-	if (!Mountain)
-	{
-		UE_LOG(LogRaceMountains, Warning, TEXT("race.Mountains missing %s"), MountainMesh);
 		return;
 	}
-
-	FRandomStream Random(1717);
-	for (const FRange& Range : Ranges)
+	for (UStaticMeshComponent* Mountain : Mountains)
 	{
+		if (Mountain)
+		{
+			Mountain->DestroyComponent();
+		}
+	}
+	Mountains.Reset();
+	bBuilt = true;
+	BuiltTheme = Theme;
+	BuiltSeason = Season;
+
+	const FRaceThemeContent& Content = RaceTheme::Get(Theme);
+	FRandomStream Random(1717);
+	for (int32 RangeIndex = 0; RangeIndex < UE_ARRAY_COUNT(Ranges); ++RangeIndex)
+	{
+		const FRange& Range = Ranges[RangeIndex];
+		const TArray<FString>& Models = RangeIndex == 0 ? Content.NearMountains : Content.FarMountains;
+		if (Models.Num() == 0)
+		{
+			continue;
+		}
 		const float Spacing = UE_TWO_PI * Range.Distance / Range.Count;
 		for (int32 Index = 0; Index < Range.Count; ++Index)
 		{
-			UStaticMesh* Mesh = (Range.bUseHills && Hills.Num() > 0 && Random.FRand() < 0.4f) ? Hills[Random.RandRange(0, Hills.Num() - 1)] : Mountain;
+			UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *Models[Random.RandRange(0, Models.Num() - 1)]);
+			if (!Mesh)
+			{
+				continue;
+			}
 			const FBox Bounds = Mesh->GetBoundingBox();
 			const FVector Size = Bounds.GetSize();
 			if (Size.Z <= KINDA_SMALL_NUMBER || FMath::Max(Size.X, Size.Y) <= KINDA_SMALL_NUMBER)
@@ -80,19 +84,28 @@ void ARaceMountainRing::BeginPlay()
 			const float Width = Spacing * Range.WidthPerSpacing * Random.FRandRange(0.85f, 1.15f);
 
 			// Stretch each model to the wanted width and height, base just below the ground.
-			const FVector Scale(Width / FMath::Max(Size.X, Size.Y), Width / FMath::Max(Size.X, Size.Y), PeakHeight / Size.Z);
+			const float Across = Width / FMath::Max(Size.X, Size.Y);
+			const FVector Scale(Across, Across, PeakHeight / Size.Z);
 			const FVector Location(FMath::Cos(Azimuth) * Distance, FMath::Sin(Azimuth) * Distance, -Bounds.Min.Z * Scale.Z - PeakHeight * 0.04f);
 
 			UStaticMeshComponent* Component = NewObject<UStaticMeshComponent>(this);
 			Component->SetStaticMesh(Mesh);
 			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			Component->SetCastShadow(false);
+			for (int32 Slot = 0; Slot < Mesh->GetStaticMaterials().Num(); ++Slot)
+			{
+				UMaterialInterface* Material = Mesh->GetMaterial(Slot);
+				UMaterialInterface* Seasonal = RaceTheme::SeasonMaterial(Material, Season);
+				if (Seasonal != Material)
+				{
+					Component->SetMaterial(Slot, Seasonal);
+				}
+			}
 			Component->SetupAttachment(RootComponent);
 			Component->SetRelativeTransform(FTransform(FRotator(0.0f, Random.FRandRange(0.0f, 360.0f), 0.0f), Location, Scale));
 			Component->RegisterComponent();
 			Mountains.Add(Component);
 		}
 	}
-	UE_LOG(LogRaceMountains, Log, TEXT("race.Mountains %d ranges, %d pieces (mountain model %.0f x %.0f x %.0f UU)"),
-		int32(UE_ARRAY_COUNT(Ranges)), Mountains.Num(), Mountain->GetBoundingBox().GetSize().X, Mountain->GetBoundingBox().GetSize().Y, Mountain->GetBoundingBox().GetSize().Z);
+	UE_LOG(LogRaceMountains, Log, TEXT("race.Mountains %s %s: %d pieces"), RaceTheme::Name(Theme), RaceTheme::Name(Season), Mountains.Num());
 }

@@ -23,3 +23,6 @@ xrp_TopDownRace/Binaries/Win64/*
 __pycache__/
 *.pyc
 xrp_TopDownRace/Tools/TrackGen/track_preview.svg
+
+# LPRiverForest demo maps (225 MB of landscape; the game only uses the pack's meshes and materials)
+xrp_TopDownRace/Content/LPRiverForest/Maps/

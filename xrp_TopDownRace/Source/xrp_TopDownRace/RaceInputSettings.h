@@ -4,6 +4,25 @@
 #include "Engine/DeveloperSettings.h"
 #include "RaceInputSettings.generated.h"
 
+/** Scenery theme. */
+UENUM()
+enum class ERaceTheme : uint8
+{
+	Countryside UMETA(DisplayName = "Countryside"),
+	RiverForest UMETA(DisplayName = "River forest"),
+	Random UMETA(DisplayName = "Random each race"),
+};
+
+/** Season for the River Forest theme (countryside is always summer). */
+UENUM()
+enum class ERaceSeason : uint8
+{
+	Summer UMETA(DisplayName = "Summer"),
+	Autumn UMETA(DisplayName = "Autumn"),
+	Snow UMETA(DisplayName = "Snow"),
+	Random UMETA(DisplayName = "Random each race"),
+};
+
 /** How many rows of cells random tracks are laid out on (the room fits 2 columns and up to 4 rows). */
 UENUM()
 enum class ERaceTrackGrid : uint8
@@ -52,6 +71,17 @@ public:
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Race")
 	ERaceTrackGrid TrackGrid = ERaceTrackGrid::Mixed;
+
+	/**
+	 * Scenery round the track, chosen as each race lines up: Countryside (meadow, tents, green hills) or River forest
+	 * (LPRiverForest pack: pines, rocks, streams, a lake and cliffs), or a random one each race.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Scenery")
+	ERaceTheme Theme = ERaceTheme::Random;
+
+	/** Season for River forest: summer greens, autumn oranges or snow (Random picks one each race). */
+	UPROPERTY(Config, EditAnywhere, Category = "Scenery")
+	ERaceSeason Season = ERaceSeason::Random;
 
 	/** Slipstream: a car close behind another goes faster, so it can pull out and overtake. */
 	UPROPERTY(Config, EditAnywhere, Category = "Race")

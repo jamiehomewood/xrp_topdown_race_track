@@ -36,6 +36,8 @@ void FRaceSettingsMenu::Initialise()
 	AddToggle(TEXT("NEW TRACK EACH RACE"), Race, TEXT("bNewTrackEachRace"));
 	AddToggle(TEXT("NARROW SECTIONS"), Race, TEXT("bNarrowTrackSections"));
 	AddValue(TEXT("TRACK GRID"), Race, TEXT("TrackGrid"), 0, 0, 1, EFormat::Integer); // range comes from the enum
+	AddValue(TEXT("THEME"), Race, TEXT("Theme"), 0, 0, 1, EFormat::Integer);
+	AddValue(TEXT("SEASON"), Race, TEXT("Season"), 0, 0, 1, EFormat::Integer);
 	AddToggle(TEXT("SLIPSTREAM"), Race, TEXT("bDraftingEnabled"));
 
 	// Computer drivers (pace is rolled per car at the start of each race).

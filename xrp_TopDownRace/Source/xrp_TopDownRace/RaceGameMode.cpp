@@ -263,7 +263,7 @@ void ARaceGameMode::BeginPlay()
 	BuilderParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	TrackBuilder = GetWorld()->SpawnActor<ARaceTrackBuilder>(FVector::ZeroVector, FRotator::ZeroRotator, BuilderParams);
 	UE_LOG(LogRace, Log, TEXT("race.Track hid %d level track / floor scenery actors"), ARaceTrackBuilder::HideLevelTrack(GetWorld()));
-	GetWorld()->SpawnActor<ARaceMountainRing>(FVector::ZeroVector, FRotator::ZeroRotator, BuilderParams);
+	MountainRing = GetWorld()->SpawnActor<ARaceMountainRing>(FVector::ZeroVector, FRotator::ZeroRotator, BuilderParams);
 
 	EnsureCars();
 	SpawnRaceProps();
@@ -1446,6 +1446,23 @@ void ARaceGameMode::ChangeTrack()
 {
 	const bool bNewTrack = GetDefault<URaceInputSettings>()->bNewTrackEachRace;
 	const int32 Seed = CVarRaceTrackSeed.GetValueOnGameThread();
+
+	// Scenery theme and season for this race (Random picks each race; countryside is always summer).
+	const URaceInputSettings* SceneSettings = GetDefault<URaceInputSettings>();
+	FRandomStream SceneRandom(Seed != 0 ? Seed * 31 + TrackNumber : FMath::Rand());
+	ERaceThemeKind Theme = SceneSettings->Theme == ERaceTheme::RiverForest ? ERaceThemeKind::RiverForest : ERaceThemeKind::Countryside;
+	if (SceneSettings->Theme == ERaceTheme::Random)
+	{
+		Theme = SceneRandom.FRand() < 0.5f ? ERaceThemeKind::Countryside : ERaceThemeKind::RiverForest;
+	}
+	ERaceSeasonKind Season = SceneSettings->Season == ERaceSeason::Random
+		? static_cast<ERaceSeasonKind>(SceneRandom.RandRange(0, 2))
+		: static_cast<ERaceSeasonKind>(uint8(SceneSettings->Season));
+	if (Theme == ERaceThemeKind::Countryside)
+	{
+		Season = ERaceSeasonKind::Summer;
+	}
+
 	FRaceTrackLayout Layout = RaceTrackGenerator::Classic();
 	if (bNewTrack)
 	{
@@ -1469,17 +1486,23 @@ void ARaceGameMode::ChangeTrack()
 			UE_LOG(LogRace, Warning, TEXT("race.Track no random track found; using the original"));
 		}
 	}
-	else if (bTrackBuilt && CurrentLayout.Name == Layout.Name)
+	else if (bTrackBuilt && CurrentLayout.Name == Layout.Name && Theme == CurrentTheme && Season == CurrentSeason)
 	{
-		return; // the original track is already built
+		return; // the original track is already built in this scenery
 	}
 
 	CurrentLayout = Layout;
 	TrackPath.Build(Layout.ControlPoints, Layout.StartLine, Layout.Narrowings);
 	++TrackNumber;
+	CurrentTheme = Theme;
+	CurrentSeason = Season;
 	if (TrackBuilder)
 	{
-		TrackBuilder->Build(TrackPath, Seed != 0 ? Seed + TrackNumber : FMath::Rand());
+		TrackBuilder->Build(TrackPath, Seed != 0 ? Seed + TrackNumber : FMath::Rand(), Theme, Season);
+	}
+	if (MountainRing)
+	{
+		MountainRing->Build(Theme, Season);
 	}
 	UpdateGridSlots();
 	if (StartLights && GantryBoard != INDEX_NONE)
@@ -1487,7 +1510,8 @@ void ARaceGameMode::ChangeTrack()
 		StartLights->SetBoardTransform(GantryBoard, GetGantryTransform());
 	}
 	bTrackBuilt = true;
-	UE_LOG(LogRace, Log, TEXT("race.Track %d: %s, %d corners, lap %.0f UU"), TrackNumber, *Layout.Name, Layout.ControlPoints.Num(), TrackPath.GetLapLength());
+	UE_LOG(LogRace, Log, TEXT("race.Track %d: %s, %d corners, lap %.0f UU, %s (%s)"), TrackNumber, *Layout.Name, Layout.ControlPoints.Num(),
+		TrackPath.GetLapLength(), RaceTheme::Name(Theme), RaceTheme::Name(Season));
 }
 
 void ARaceGameMode::UpdateGridSlots()
