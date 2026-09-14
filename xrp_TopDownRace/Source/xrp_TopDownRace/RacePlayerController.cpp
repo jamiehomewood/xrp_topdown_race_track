@@ -13,7 +13,8 @@ namespace
 		TEXT("race.AutoDrive"), 0,
 		TEXT("Test aid (no controller needed): players take their cars and drive by themselves, logging position, distance moved, FPS, slipstream and spin each second. ")
 		TEXT("1 = full throttle straight, 2 = steering 60% and steering the other way when stuck against a wall, ")
-		TEXT("3 = driven by the computer driver (checks taking over a car), 4 = doughnut: throttle + handbrake + full lock."));
+		TEXT("3 = driven by the computer driver (checks taking over a car), 4 = doughnut: throttle + handbrake + full lock, ")
+		TEXT("5 = handling test on open ground: repeated full-throttle straights then full lock, logging slip angle and turn rate (race.Handling)."));
 
 	TAutoConsoleVariable<int32> CVarRaceAutoDriveCars(
 		TEXT("race.AutoDriveCars"), 4,
@@ -165,11 +166,35 @@ void ARacePlayerController::PlayerTick(float DeltaTime)
 		{
 			GameMode->ComputeComputerDriverInput(Slot, DeltaTime, Throttle, Brake, Steer, bHandbrake);
 		}
-		else if (AutoDriveMode >= 4)
+		else if (AutoDriveMode == 4)
 		{
 			Throttle = 0.7f;
 			Steer = 1.0f;
 			bHandbrake = true;
+		}
+		else if (AutoDriveMode >= 5 && Car->IsPlayerControlled() && !Car->AreControlsLocked())
+		{
+			// Handling test: well away from the track (nothing to hit out there), repeat a 5 s cycle of
+			// 2.5 s full throttle straight, 1.5 s full lock with throttle, 1 s straight.
+			if (!bHandlingTestPlaced)
+			{
+				bHandlingTestPlaced = true;
+				Car->PlaceOnGrid(FTransform(FRotator::ZeroRotator, FVector(-6000.0f, 15000.0f, 0.0f)));
+				HandlingTestTime = 0.0f;
+			}
+			HandlingTestTime += DeltaTime;
+			const float CycleTime = FMath::Fmod(HandlingTestTime, 5.0f);
+			const bool bTurning = CycleTime >= 2.5f && CycleTime < 4.0f;
+			Throttle = 1.0f;
+			Steer = bTurning ? 1.0f : 0.0f;
+
+			HandlingLogTimer += DeltaTime;
+			if (HandlingLogTimer >= 0.05f)
+			{
+				HandlingLogTimer = 0.0f;
+				UE_LOG(LogTemp, Log, TEXT("race.Handling t=%.2f cycle %.2f steer %.0f speed %.0f yawrate %.0f slip %.1f"),
+					HandlingTestTime, CycleTime, Steer, Car->GetSpeed(), Car->GetSpinRate(), Car->GetSlipAngle());
+			}
 		}
 
 		AutoDriveLogTimer += DeltaTime;

@@ -40,4 +40,7 @@ private:
 	float AutoDriveFlipHold = 0.0f;
 	FVector AutoDriveProbeLocation = FVector::ZeroVector;
 	int32 AutoDriveEscapes = 0;
+	bool bHandlingTestPlaced = false;
+	float HandlingTestTime = 0.0f;
+	float HandlingLogTimer = 0.0f;
 };

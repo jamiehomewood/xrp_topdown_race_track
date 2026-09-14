@@ -269,6 +269,16 @@ void ARaceCarPawn::ApplyBump(const FVector& DeltaVelocity, const FVector& WorldC
 	TimeSinceWallHit = 0.0f;
 }
 
+float ARaceCarPawn::GetSlipAngle() const
+{
+	if (Velocity.Size2D() < 50.0f)
+	{
+		return 0.0f;
+	}
+	const FVector Forward = GetActorForwardVector().GetSafeNormal2D();
+	return FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(Forward, Velocity.GetSafeNormal2D()), -1.0f, 1.0f)));
+}
+
 void ARaceCarPawn::AddSpin(const FVector& Offset, const FVector& Impulse)
 {
 	// 2D cross product: positive turns +X towards +Y, which is a positive yaw.
@@ -382,6 +392,8 @@ void ARaceCarPawn::Tick(float DeltaSeconds)
 	{
 		SteerScale = FMath::Max(SteerScale, MinSteerScale);
 	}
+	// Less turn rate as speed builds: the nose can't outrun the tyres at full speed (no snap oversteer).
+	SteerScale *= FMath::Lerp(1.0f, HighSpeedTurnScale, FMath::Clamp(FMath::Abs(ForwardSpeed) / MaxSpeed, 0.0f, 1.0f));
 	if (bHandbrake)
 	{
 		SteerScale = FMath::Max(SteerScale, 0.9f) * HandbrakeTurnBoost;

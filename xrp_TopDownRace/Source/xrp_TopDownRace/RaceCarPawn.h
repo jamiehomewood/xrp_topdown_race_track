@@ -15,8 +15,9 @@ class UTextRenderComponent;
  * Arcade top-down car with a GTA 2 style feel: slides, bounces off walls and other cars with a spin, and a
  * handbrake for doughnuts. Not possessed: a player's ARacePlayerController or the game mode's computer driver
  * feeds it input every frame. Units follow the track build (1 physical cm = 10 UU), so speeds are real-car scale.
+ * Handling values are config: tune them in Config/DefaultGame.ini under [/Script/xrp_TopDownRace.RaceCarPawn].
  */
-UCLASS()
+UCLASS(Config = Game)
 class XRP_TOPDOWNRACE_API ARaceCarPawn : public APawn
 {
 	GENERATED_BODY()
@@ -39,6 +40,10 @@ public:
 	bool IsActive() const { return bActive; }
 	float GetSpeed() const { return Velocity.Size2D(); }
 	float GetSpinRate() const { return AngularVelocity; }
+	virtual FVector GetVelocity() const override { return Velocity; }
+
+	/** Angle in degrees between where the car points and where it is actually going (0 = no slide). */
+	float GetSlipAngle() const;
 
 	/** Race control: while locked the car stays put and the throttle only revs the engine (grid, lights, results). */
 	void SetControlsLocked(bool bLocked);
@@ -86,7 +91,7 @@ public:
 	 * Every vehicle model is scaled to this length (UU, nose to tail), so a van or monster truck races on equal
 	 * terms with a sports car. Collision and ride height follow the scaled mesh.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Race|Car", meta = (ClampMin = "50.0"))
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Car", meta = (ClampMin = "50.0"))
 	float CarLength = 237.0f;
 
 	/** Scale applied to the current mesh to reach CarLength. */
@@ -102,83 +107,87 @@ public:
 	float RoadHeight = 2.0f;
 
 	/** Top speed without a slipstream. Kept modest so a drafting car can catch up and pass on the straights. */
-	UPROPERTY(EditAnywhere, Category = "Race|Handling")
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling")
 	float MaxSpeed = 1800.0f;
 
-	UPROPERTY(EditAnywhere, Category = "Race|Handling")
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling")
 	float MaxReverseSpeed = 700.0f;
 
-	UPROPERTY(EditAnywhere, Category = "Race|Handling")
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling")
 	float Acceleration = 1500.0f;
 
-	UPROPERTY(EditAnywhere, Category = "Race|Handling")
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling")
 	float BrakeDeceleration = 3200.0f;
 
 	/** Speed lost per second when coasting. */
-	UPROPERTY(EditAnywhere, Category = "Race|Handling")
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling")
 	float CoastDeceleration = 800.0f;
 
-	/** Degrees per second at full steer once above FullSteerSpeed. */
-	UPROPERTY(EditAnywhere, Category = "Race|Handling")
+	/** Degrees per second at full steer at low to mid speed (see HighSpeedTurnScale). */
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling")
 	float TurnRate = 240.0f;
 
+	/** Fraction of TurnRate left at top speed, so a flick at full speed doesn't swing the nose round (oversteer). */
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+	float HighSpeedTurnScale = 0.6f;
+
 	/** Below this speed steering is scaled down, so a parked car can't spin on the spot. */
-	UPROPERTY(EditAnywhere, Category = "Race|Handling")
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling")
 	float FullSteerSpeed = 450.0f;
 
 	/** Steering kept at a standstill while throttle or brake is held, so a car pinned on a wall can turn away. */
-	UPROPERTY(EditAnywhere, Category = "Race|Handling", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float MinSteerScale = 0.6f;
 
-	/** How quickly sideways sliding is killed (higher = grippier, lower = driftier). */
-	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float Grip = 5.0f;
+	/** How quickly the direction of travel follows the nose (higher = grippier, lower = driftier). */
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling")
+	float Grip = 9.0f;
 
 	/** How quickly the turn rate follows the stick while steering (higher = snappier). */
-	UPROPERTY(EditAnywhere, Category = "Race|Handling")
-	float SteerResponse = 16.0f;
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling")
+	float SteerResponse = 10.0f;
 
 	/** How quickly spin from a hit settles when not steering (lower = spins last longer). */
-	UPROPERTY(EditAnywhere, Category = "Race|Handling")
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handling")
 	float SpinRecovery = 5.0f;
 
 	/** Grip with the handbrake on: the back steps out. */
-	UPROPERTY(EditAnywhere, Category = "Race|Handbrake")
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handbrake")
 	float HandbrakeGrip = 0.7f;
 
 	/** Turn rate multiplier with the handbrake on, available even at a crawl (doughnuts). */
-	UPROPERTY(EditAnywhere, Category = "Race|Handbrake")
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handbrake")
 	float HandbrakeTurnBoost = 1.7f;
 
 	/** Speed lost per second while the handbrake is held. */
-	UPROPERTY(EditAnywhere, Category = "Race|Handbrake")
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Handbrake")
 	float HandbrakeDrag = 500.0f;
 
 	/** Fraction of into-the-wall speed bounced back. */
-	UPROPERTY(EditAnywhere, Category = "Race|Collisions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Collisions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float WallBounce = 0.55f;
 
 	/** Bounciness of car-to-car hits (both cars share the impulse). */
-	UPROPERTY(EditAnywhere, Category = "Race|Collisions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Collisions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float CarBounce = 0.6f;
 
 	/** Spin from an off-centre hit: degrees per second per (UU offset x UU/s impulse). */
-	UPROPERTY(EditAnywhere, Category = "Race|Collisions", meta = (ClampMin = "0.0"))
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Collisions", meta = (ClampMin = "0.0"))
 	float ImpactSpin = 0.0025f;
 
 	/** Extra top speed at full slipstream (0.22 = +22%). */
-	UPROPERTY(EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.0"))
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.0"))
 	float DraftTopSpeedBonus = 0.22f;
 
 	/** Extra acceleration at full slipstream (0.6 = +60%). */
-	UPROPERTY(EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.0"))
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.0"))
 	float DraftAccelerationBonus = 0.6f;
 
 	/** How fast the slipstream builds up (1/s) when tucked in behind, and fades (1/s) after pulling out. */
-	UPROPERTY(EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.1"))
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.1"))
 	float DraftBuildRate = 2.5f;
 
-	UPROPERTY(EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.1"))
+	UPROPERTY(Config, EditAnywhere, Category = "Race|Drafting", meta = (ClampMin = "0.1"))
 	float DraftFadeRate = 1.5f;
 
 private:
