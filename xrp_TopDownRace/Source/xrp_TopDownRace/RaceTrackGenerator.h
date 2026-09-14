@@ -11,7 +11,7 @@ struct FRaceTrackLayout
 };
 
 /**
- * Random circuits for the room. A layout is the outline of a random group of cells on a 2-column grid whose cut
+ * Random circuits for the room. A layout is the outline of a random group of cells on a 2-column, 2-4 row grid whose cut
  * positions are random too (the original track is one of these: 6 cells with a side cell missing), so the road never
  * crosses itself and every corner is a rounded right angle. The direction of travel and the start straight are
  * random. Every layout is checked before use: it stays inside the room floor's walkway, every straight is long

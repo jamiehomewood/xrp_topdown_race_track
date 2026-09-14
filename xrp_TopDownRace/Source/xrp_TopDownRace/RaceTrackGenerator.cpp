@@ -6,11 +6,12 @@
 
 namespace
 {
-	// The centreline stays inside this box, which leaves the same walkway round the room edge as the original track.
-	constexpr double CentreLimitX = 1450.0;
-	constexpr double CentreLimitY = 1950.0;
+	// The centreline stays inside this box: 30 cm further out on every side than the original track, which leaves
+	// the outer kerb about 36 cm and the fence about 27 cm from the room walls (and clear of the corner panels).
+	constexpr double CentreLimitX = 1750.0;
+	constexpr double CentreLimitY = 2250.0;
 
-	constexpr int32 Columns = 2;                 // 2.9 m across fits two cells at most
+	constexpr int32 Columns = 2;                 // 3.5 m across fits two cells at most
 	constexpr double MinCellSize = 1100.0;       // >= two corner radii, plus a strip of grass in narrow gaps
 	constexpr double MinLapLength = 9000.0;
 	constexpr double MinCentreGap = 930.0;       // road + both kerb walls + a little grass between separate stretches
@@ -49,8 +50,9 @@ bool RaceTrackGenerator::Generate(FRandomStream& Random, FRaceTrackLayout& OutLa
 {
 	for (int32 Attempt = 0; Attempt < MaxAttempts; ++Attempt)
 	{
-		// Grid: 2 columns, and 3 rows (most layouts) or 2, with random cut positions; every cell >= MinCellSize.
-		const int32 Rows = Random.FRand() < 0.7f ? 3 : 2;
+		// Grid: 2 columns and 2-4 rows (4.5 m fits four), with random cut positions; every cell >= MinCellSize.
+		const float RowRoll = Random.FRand();
+		const int32 Rows = RowRoll < 0.35f ? 4 : (RowRoll < 0.8f ? 3 : 2);
 		TArray<double> XCuts = { -CentreLimitX, RandomRange(Random, -CentreLimitX + MinCellSize, CentreLimitX - MinCellSize), CentreLimitX };
 		TArray<double> YCuts = { -CentreLimitY };
 		for (int32 Row = 1; Row < Rows; ++Row)

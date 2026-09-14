@@ -66,9 +66,10 @@ player's colour underneath and a "P1".."P4" roof badge; CPU cars show a grey num
 - With `bNewTrackEachRace` (on by default; also in the settings menu) every race gets a new random circuit, built
   in the game when the cars line up: road, kerb walls, start line and gantry, a fence round the outside, and low
   scenery scattered over the rest of the room floor. Turn it off to always race the original track.
-- A layout is the outline of a random group of cells on a 2-column grid with random cut positions (the original
-  track is one of them), so the road never crosses itself and corners are rounded right angles. The direction and
-  the start straight are random too. Each layout is checked before use: inside the walkway round the room edge,
+- A layout is the outline of a random group of cells on a 2-column, 2-4 row grid with random cut positions (the
+  original track is one of them), so the road never crosses itself and corners are rounded right angles. The
+  direction and the start straight are random too. Random tracks use a footprint 30 cm bigger on every side than the
+  original (outer kerb ~36 cm, fence ~27 cm from the room walls). Each layout is checked before use: inside that footprint,
   straights long enough for the corners, grass between neighbouring stretches of road, a lap of at least 9 m,
   and a straight with room for the grid behind the start line.
 - Laps, positions, slipstream and the computer drivers all follow whichever track is built.
